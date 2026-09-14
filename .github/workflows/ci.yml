@@ -49,8 +49,9 @@ jobs:
       - name: Scan infrastructure with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: local/hybrid-rag:${{ github.sha }}
+          scan-type: config
+          scan-ref: .
           format: table
-          exit-code: "0" # Change from "1" to "0" to warn instead of block
+          exit-code: "0"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
