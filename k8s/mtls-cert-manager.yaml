@@ -1,0 +1,10 @@
+# cert-manager integration hook (apply after customizing issuer and DNS)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: {name: rag-ca, namespace: rag}
+spec: {selfSigned: {}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: rag-api-tls, namespace: rag}
+spec: {secretName: rag-api-tls, issuerRef: {name: rag-ca}, dnsNames: [rag-api.rag.svc.cluster.local]}

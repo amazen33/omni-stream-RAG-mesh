@@ -1,0 +1,20 @@
+- name: Provision hybrid RAG node
+  hosts: all
+  become: true
+  vars:
+    ollama_models: ["nomic-embed-text", "llama3.2:3b"]
+  tasks:
+    - name: Install Docker and utilities
+      ansible.builtin.apt: {name: [docker.io, docker-compose-plugin, curl], state: present, update_cache: true}
+    - name: Add operator to docker group
+      ansible.builtin.user: {name: "{{ ansible_user }}", groups: docker, append: true}
+    - name: Install NVIDIA container toolkit (Ubuntu)
+      ansible.builtin.shell: curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      args: {creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg}
+    - name: Create persistent directories
+      ansible.builtin.file: {path: "{{ item }}", state: directory, mode: '0750'}
+      loop: [/opt/rag/minio, /opt/rag/ollama, /opt/rag/opensearch]
+    - name: Pull Ollama models
+      ansible.builtin.command: "docker exec ollama ollama pull {{ item }}"
+      loop: "{{ ollama_models }}"
+      changed_when: false

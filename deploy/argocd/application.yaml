@@ -1,0 +1,8 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: {name: hybrid-rag, namespace: argocd}
+spec:
+  project: default
+  source: {repoURL: https://github.com/example/hybrid-rag.git, targetRevision: main, path: k8s}
+  destination: {server: https://kubernetes.default.svc, namespace: rag}
+  syncPolicy: {automated: {prune: true, selfHeal: true}, syncOptions: [CreateNamespace=true]}

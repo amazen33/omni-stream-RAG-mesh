@@ -1,0 +1,15 @@
+# Flink SQL streaming job (submit with Flink Kubernetes operator)
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata: {name: transaction-anomaly, namespace: rag}
+spec:
+  image: flink:1.20-java17
+  flinkVersion: v1_20
+  serviceAccount: flink
+  jobManager: {resource: {cpu: 1, memory: 2048m}}
+  taskManager: {resource: {cpu: 2, memory: 4096m}, replicas: 2}
+  job: {jarURI: local:///opt/flink/lib/flink-sql-connector-kafka-3.3.0.jar, parallelism: 2, upgradeMode: savepoint}
+  podTemplate: {spec: {containers: [{name: flink-main-container, env: [{name: KAFKA_BOOTSTRAP, value: kafka-kafka-bootstrap:9092}, {name: MINIO_ENDPOINT, value: http://minio:9000}]}]}}
+---
+# SQL intent: consume Debezium envelopes, 5-minute windows, z-score anomalies, dual-write Parquet/OpenSearch.
+# Keep credentials in Kubernetes Secret and inject via mounted Hadoop config.
