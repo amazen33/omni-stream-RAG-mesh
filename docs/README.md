@@ -17,6 +17,7 @@ environment-driven integration.
 
 ## C4 model
 
+- [C4 notation and rendering guide](c4-model/README.md)
 - [Level 1: System context](c4-model/level-1-system-context.md)
 - [Level 2: Container](c4-model/level-2-container.md)
 - [Level 3: Component](c4-model/level-3-component.md)

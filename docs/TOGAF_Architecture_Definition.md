@@ -48,6 +48,34 @@ service --> process
 process --> data
 ```
 
+### Phase A equivalent views
+
+```mermaid
+flowchart LR
+    Analyst[Financial Analyst] --> Platform[omni-stream-RAG-mesh]
+    Operator[IoT Device / Operator] --> Platform
+    Platform --> Evidence[Explainable compliance evidence]
+    Platform --> Telemetry[Low-latency telemetry intelligence]
+    Platform --> Privacy[PII minimization and residency]
+```
+
+```plantuml
+@startuml
+title Phase A - Architecture vision
+actor "Financial Analyst" as analyst
+actor "IoT Device / Operator" as operator
+rectangle "omni-stream-RAG-mesh" as platform
+usecase "Explainable compliance evidence" as evidence
+usecase "Telemetry intelligence" as telemetry
+usecase "PII minimization" as privacy
+analyst --> platform
+operator --> platform
+platform --> evidence
+platform --> telemetry
+platform --> privacy
+@enduml
+```
+
 ## Phase B — Business architecture
 
 ### Value streams
@@ -82,6 +110,30 @@ fa --> audit
 iot --> telemetry
 audit --> investigation
 telemetry --> windows
+```
+
+```mermaid
+flowchart LR
+    A[Financial Analyst] --> Audit[Financial compliance audit]
+    O[IoT Device / Operator] --> Monitor[IoT telemetry monitoring]
+    Audit --> RAG[PII-aware RAG investigation]
+    Monitor --> Window[Windowed telemetry processing]
+```
+
+```plantuml
+@startuml
+title Phase B - Business architecture
+actor "Financial Analyst" as analyst
+actor "IoT Device / Operator" as operator
+rectangle "Financial compliance audit" as audit
+rectangle "IoT telemetry monitoring" as monitoring
+rectangle "PII-aware RAG investigation" as investigation
+rectangle "Windowed telemetry processing" as windowing
+analyst --> audit
+operator --> monitoring
+audit --> investigation
+monitoring --> windowing
+@enduml
 ```
 
 ## Phase C — Information systems architecture
@@ -123,6 +175,44 @@ governance --> audits
 publisher --> parquet
 ```
 
+```mermaid
+flowchart TB
+    API[FastAPI DDD service] --> Ingest[Ingestion context]
+    API --> AI[AI / Retrieval context]
+    API --> Gov[Governance context]
+    Ingest --> Events[Kafka domain events]
+    AI --> Vector[ChromaDB vectors + Ollama embeddings]
+    AI --> Search[OpenSearch / optional Elasticsearch]
+    Gov --> Audit[MinIO/S3 object-locked audit JSON]
+    Events --> Stream[Spark Structured Streaming]
+    Stream --> Parquet[MinIO/S3 Parquet]
+```
+
+```plantuml
+@startuml
+title Phase C - Information systems architecture
+component "FastAPI DDD service" as api
+component "Ingestion context" as ingestion
+component "AI / Retrieval context" as ai
+component "Governance context" as governance
+queue "Kafka domain events" as kafka
+database "ChromaDB vector store" as chroma
+database "OpenSearch / Elasticsearch" as search
+cloud "MinIO / S3 audit objects" as object
+component "Spark Structured Streaming" as spark
+database "Parquet data" as parquet
+api --> ingestion
+api --> ai
+api --> governance
+ingestion --> kafka
+ai --> chroma
+ai --> search
+governance --> object
+kafka --> spark
+spark --> parquet
+@enduml
+```
+
 ## Phase D — Technology architecture
 
 The technology baseline is container-first and platform-agnostic:
@@ -158,6 +248,44 @@ k8s --> object
 k8s --> rag
 k8s --> search
 k8s --> trust
+```
+
+```mermaid
+flowchart LR
+    CI[Jenkins + Trivy gates] --> Registry[Container registry]
+    Terraform[Terraform AWS/Azure] --> Runtime[K3s/Kubernetes]
+    Ansible[Ansible host provisioning] --> Runtime
+    Argo[ArgoCD / Rollouts] --> Runtime
+    Runtime --> Kafka[Kafka KRaft]
+    Runtime --> Spark[Spark]
+    Runtime --> Data[MinIO, ChromaDB, OpenSearch, Ollama]
+    Trust[mTLS + NetworkPolicy + external secrets] --> Runtime
+```
+
+```plantuml
+@startuml
+title Phase D - Technology architecture
+component "Jenkins + Trivy" as ci
+cloud "Container registry" as registry
+component "Terraform AWS/Azure" as terraform
+component "Ansible" as ansible
+component "ArgoCD / Rollouts" as argo
+node "K3s / Kubernetes" as k8s
+node "Kafka KRaft" as kafka
+node "Spark Structured Streaming" as spark
+database "MinIO / ChromaDB / OpenSearch" as data
+component "Ollama" as ollama
+component "mTLS / NetworkPolicy / external secrets" as trust
+ci --> registry
+terraform --> k8s
+ansible --> k8s
+argo --> k8s
+k8s --> kafka
+k8s --> spark
+k8s --> data
+k8s --> ollama
+trust --> k8s
+@enduml
 ```
 
 ## Phase E — Opportunities and solutions
@@ -198,6 +326,32 @@ baseline --> identity
 identity --> scale
 scale --> integrate
 integrate --> target
+```
+
+```mermaid
+flowchart LR
+    Baseline[0 Baseline: Compose] --> Govern[1 Govern: PII, IAM, TLS]
+    Govern --> Stream[2 Stream: replicated Kafka + checkpoints]
+    Stream --> Scale[3 Scale: K3s/Kubernetes + managed storage]
+    Scale --> Integrate[4 Integrate: enterprise IAM, SIEM, catalog]
+    Integrate --> Optimize[5 Optimize: evaluation and canaries]
+```
+
+```plantuml
+@startuml
+title Phase E - Opportunities and migration roadmap
+rectangle "0 Baseline - Compose" as baseline
+rectangle "1 Govern - PII, IAM, TLS" as govern
+rectangle "2 Stream - Kafka replication" as stream
+rectangle "3 Scale - Kubernetes and storage" as scale
+rectangle "4 Integrate - enterprise services" as integrate
+rectangle "5 Optimize - evaluation and canaries" as optimize
+baseline --> govern
+govern --> stream
+stream --> scale
+scale --> integrate
+integrate --> optimize
+@enduml
 ```
 
 ## Architecture governance
