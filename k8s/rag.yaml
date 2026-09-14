@@ -10,16 +10,6 @@ data:
   AUDIT_BUCKET: rag-audit
   AWS_REGION: us-east-1
   OLLAMA_BASE_URL: http://ollama.rag.svc:11434
----
-apiVersion: v1
-kind: Secret
-metadata: {name: rag-secrets, namespace: rag}
-type: Opaque
-stringData:
-  AWS_ACCESS_KEY_ID: replace-me
-  AWS_SECRET_ACCESS_KEY: replace-me
-  PII_TOKEN_SALT: replace-me
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: {name: rag-data, namespace: rag}

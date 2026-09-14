@@ -13,11 +13,19 @@ flowchart LR
     Argo --> K8s[Kubernetes]
 ```
 
-`Jenkinsfile` runs tests, builds the image, blocks on unfixed HIGH/CRITICAL
-Trivy image findings, blocks on HIGH/CRITICAL IaC findings, and then publishes
-to GHCR plus an optional Azure Container Registry. Credentials are Jenkins
-credentials, not repository files. Terraform and Ansible are operated
-separately with reviewed plans and least-privilege identities.
+`.github/workflows/ci.yml` runs tests, builds the image, and blocks on unfixed
+HIGH/CRITICAL Trivy image and IaC findings with read-only repository
+permissions. `.github/workflows/publish-deploy.yml` only publishes on a
+version tag or explicit dispatch, and deploys only when the protected
+`production` environment and `KUBE_CONFIG` secret are supplied. `Jenkinsfile`
+provides the same gates; publishing is opt-in parameters using Jenkins
+credentials. No credentials belong in repository files.
+
+Argo CD should synchronize reviewed manifests after an immutable image tag is
+published. Kubernetes runtime secrets must be resolved from an external secret
+manager (or an equivalent protected CI secret), not committed `stringData`.
+Terraform and Ansible are operated separately with reviewed plans and
+least-privilege identities.
 
 ## Configuration
 

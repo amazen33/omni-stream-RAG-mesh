@@ -14,6 +14,13 @@ See [`docs/README.md`](docs/README.md) for the system context, domain events,
 data flows, deployment topology, security boundaries, and delivery/operations
 architecture documentation.
 
+CI configuration lives in `.github/workflows/`: pull requests run tests,
+Docker build, and Trivy image/IaC gates. Publishing and deployment are
+explicit, secret-driven operations; see
+[`docs/delivery-operations.md`](docs/delivery-operations.md). `docker compose
+exec rag-api sh` is the supported local debugging shell; the image does not
+include or run an SSH daemon.
+
 ## Domain layout
 `contexts/ingestion`, `contexts/ai`, and `contexts/governance` are bounded contexts.
 The immutable integration events `TelemetryIngested`, `TransactionProcessed`, and

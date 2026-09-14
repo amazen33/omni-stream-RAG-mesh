@@ -1,0 +1,65 @@
+name: Publish and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the published image through kubectl
+        type: boolean
+        default: false
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        name: Define image
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure cluster credentials
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          test -n "$KUBE_CONFIG" || { echo "KUBE_CONFIG production secret is required"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/kube"
+          printf '%s' "$KUBE_CONFIG" > "$RUNNER_TEMP/kube/config"
+          chmod 600 "$RUNNER_TEMP/kube/config"
+      - name: Update and apply manifest
+        env:
+          KUBECONFIG: ${{ runner.temp }}/kube/config
+          IMAGE: ${{ needs.publish.outputs.image }}
+        run: |
+          kubectl -n rag set image deployment/rag-api api="$IMAGE" --dry-run=client -o yaml |
+            kubectl apply -f -
+          kubectl -n rag rollout status deployment/rag-api --timeout=180s

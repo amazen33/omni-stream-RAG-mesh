@@ -1,0 +1,14 @@
+# Non-secret deployment contract. Replace values in the target environment.
+image:
+  repository: ghcr.io/OWNER/REPOSITORY
+  tag: immutable-git-sha
+runtime:
+  namespace: rag
+  replicas: 2
+storage:
+  s3_endpoint_url: https://object-store.example.invalid
+  audit_bucket: rag-audit
+secrets:
+  # References, not values. Resolve through External Secrets or CI.
+  provider: external-secrets
+  object_ref: rag/runtime

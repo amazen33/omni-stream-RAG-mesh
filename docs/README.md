@@ -13,6 +13,7 @@ environment-driven integration.
 - [Deployment and infrastructure topology](deployment-topology.md)
 - [Security and trust boundaries](security.md)
 - [Delivery and operations](delivery-operations.md)
+- [DDD naming compatibility](ddd-compatibility.md)
 - [TOGAF Architecture Definition](TOGAF_Architecture_Definition.md)
 
 ## C4 model
@@ -30,6 +31,10 @@ The executable configuration is in the repository root and its subdirectories:
 `terraform/`, `ansible/`, `deploy/`, and `Jenkinsfile`. These pages document
 those files; they do not imply that optional integrations are active in every
 deployment.
+
+CI is defined in `.github/workflows/ci.yml` (tests, image build, and Trivy
+image/IaC gates). `.github/workflows/publish-deploy.yml` is an explicit,
+secret-driven GHCR publish and optional production deployment workflow.
 
 For bootstrap and troubleshooting procedures, see the root
 [README](../README.md), [architecture decisions](../ARD.md), and
