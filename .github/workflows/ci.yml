@@ -32,7 +32,7 @@ jobs:
       - name: Build image
         run: docker build --tag local/hybrid-rag:${{ github.sha }} .
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: local/hybrid-rag:${{ github.sha }}
           format: table
@@ -40,7 +40,7 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Scan infrastructure with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .
