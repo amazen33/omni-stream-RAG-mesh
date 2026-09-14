@@ -10,3 +10,14 @@ Production-oriented reference implementation for on-prem and AWS/Azure deploymen
 The API redacts PII before chunking and writes deterministic request/audit metadata to immutable S3-compatible storage. Chroma, Ollama, and OpenSearch adapters are deployment extension points; all endpoints are environment variables. Never commit `.env`, keys, certificates, or state.
 
 See `ARD.md` for architecture decisions and `LAB_OPERATIONS.md` for operations, compliance, and troubleshooting.
+See [`docs/README.md`](docs/README.md) for the system context, domain events,
+data flows, deployment topology, security boundaries, and delivery/operations
+architecture documentation.
+
+## Domain layout
+`contexts/ingestion`, `contexts/ai`, and `contexts/governance` are bounded contexts.
+The immutable integration events `TelemetryIngested`, `TransactionProcessed`, and
+`AuditRecordLogged` map to the Kafka topics `telemetry.ingested`,
+`transaction.processed`, and `audit.record.logged`. Kafka, Ollama, Chroma,
+Elasticsearch/OpenSearch, and MinIO adapters are opt-in through environment
+variables, so health checks remain usable during dependency outages.
