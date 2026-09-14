@@ -14,6 +14,7 @@ environment-driven integration.
 - [Security and trust boundaries](security.md)
 - [Delivery and operations](delivery-operations.md)
 - [Windows Python support](windows-python.md)
+- [Python compatibility policy](python-compatibility.md)
 - [Fintech payment streaming](fintech-payments.md)
 - [DDD naming compatibility](ddd-compatibility.md)
 - [TOGAF Architecture Definition](TOGAF_Architecture_Definition.md)

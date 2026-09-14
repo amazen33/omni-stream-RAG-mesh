@@ -25,6 +25,9 @@ For Windows local development, use Python 3.12 (preferred) or 3.13. Python
 3.14 is not supported for the pinned native dependencies; see
 [`docs/windows-python.md`](docs/windows-python.md). The local-only PowerShell
 launcher accepts `-PythonPath` to select an installed supported interpreter.
+The same Python 3.12/3.13 policy applies to Ubuntu/Linux, GitHub Actions,
+Docker, and Kubernetes; changing the host OS does not make Python 3.14
+compatible. See [`docs/python-compatibility.md`](docs/python-compatibility.md).
 
 ## Domain layout
 `contexts/ingestion`, `contexts/ai`, and `contexts/governance` are bounded contexts.

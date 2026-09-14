@@ -1,9 +1,11 @@
 FROM python:3.12-slim
+LABEL org.opencontainers.image.description="omni-stream-RAG-mesh runtime; Python 3.12 baseline (3.12/3.13 supported)"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN addgroup --system app && adduser --system --ingroup app app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --no-compile -r requirements.txt \
+RUN python -c "import sys; raise SystemExit('Supported Python is 3.12 or 3.13; image baseline must remain supported') if sys.version_info[:2] not in ((3, 12), (3, 13)) else None" \
+    && pip install --no-cache-dir --no-compile -r requirements.txt \
     && rm -rf /root/.cache
 COPY app ./app
 COPY domain ./domain

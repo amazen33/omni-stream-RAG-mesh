@@ -23,6 +23,12 @@ deploys only when the protected
 provides the same gates; publishing is opt-in parameters using Jenkins
 credentials. No credentials belong in repository files.
 
+CI validates Python 3.12 and 3.13. The Docker image uses Python 3.12 as its
+reproducible baseline and rejects unsupported interpreter versions during the
+image build; Kubernetes inherits that image contract. Python 3.14 is not
+made compatible by Ubuntu, Docker, or Kubernetes host changes because the
+current native dependency wheel/PyO3 constraints remain the limiting factor.
+
 Argo CD should synchronize reviewed manifests after an immutable image tag is
 published. Kubernetes runtime secrets must be resolved from an external secret
 manager (or an equivalent protected CI secret), not committed `stringData`.
