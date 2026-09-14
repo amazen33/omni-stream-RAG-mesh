@@ -1,0 +1,207 @@
+# TOGAF Architecture Definition
+
+This document applies the TOGAF Architecture Development Method (ADM) to the
+implemented omni-stream-RAG-mesh reference platform. It is an architecture
+definition and transition guide, not a claim that every enterprise control is
+already provisioned. Optional integrations are called out explicitly.
+
+## Phase A — Architecture vision
+
+### Business drivers
+
+- Produce explainable, immutable evidence for financial compliance reviews.
+- Redact/tokenize sensitive data before vector embedding or model inference.
+- Correlate transaction and IoT telemetry streams with low operational latency.
+- Preserve deployment portability across local Docker, Kubernetes/K3s, AWS, and
+  Azure using environment-driven adapters and S3-compatible storage.
+- Provide auditable delivery gates and repeatable infrastructure provisioning.
+
+### Stakeholders
+
+| Stakeholder | Concern | Architecture response |
+| --- | --- | --- |
+| Financial analyst/compliance officer | Evidence, lineage, retention | Object-lock audit records and searchable metadata |
+| IoT operator/site owner | Telemetry freshness and anomalies | Kafka topics and windowed Spark processing |
+| Data protection officer | PII minimization and residency | Redaction boundary, token salt, private data paths |
+| Platform/SRE team | Availability, scaling, recovery | Stateless API, probes, PVCs, checkpoints, snapshots |
+| Security engineering | Zero trust and supply chain | NetworkPolicy, mTLS hooks, external secrets, Trivy gates |
+| Delivery/product owner | Incremental adoption | Drop-in adapters and phased migration roadmap |
+
+### Scope and vision
+
+In scope are the FastAPI service, DDD application domains, Kafka event
+contracts, ChromaDB/Ollama retrieval, OpenSearch/Elasticsearch metadata,
+MinIO/S3 audit and lakehouse storage, Spark streaming, and deployment
+scaffolding in `docker-compose.yml`, `k8s/`, `terraform/`, `ansible/`, and
+`deploy/`. Authentication, enterprise IAM, managed Kafka, and production
+observability are integration responsibilities rather than bundled behavior.
+
+```archimate
+Business Actor "Financial Analyst" as analyst
+Business Actor "IoT Operator" as operator
+Business Service "Compliance evidence and telemetry intelligence" as service
+Business Process "Sanitize, retrieve, explain, and audit" as process
+Business Object "Protected financial and telemetry data" as data
+analyst --> service
+operator --> service
+service --> process
+process --> data
+```
+
+## Phase B — Business architecture
+
+### Value streams
+
+1. **Financial compliance audit:** ingest transaction evidence → classify and
+   tokenize PII → index sanitized evidence → retrieve supporting context →
+   produce an answer → immutably retain prompt, evidence, and output.
+2. **IoT telemetry intelligence:** receive telemetry → publish domain event →
+   window and aggregate stream → write Parquet to object storage → expose
+   indexed context for investigation.
+3. **Controlled platform change:** review code/IaC → test and scan → publish
+   artifact → synchronize deployment → observe and recover.
+
+### Actors and use cases
+
+| Actor | Use case | Current repository surface |
+| --- | --- | --- |
+| Financial analyst | Submit evidence and ask an evidence-grounded question | `POST /ingest-sample`, `POST /ask` |
+| Compliance officer | Retrieve retained audit evidence | Object-store and optional metadata-index access |
+| IoT device/operator | Publish telemetry events | Kafka integration/event topics |
+| Data engineer | Operate stream processing | `streaming/spark_job.py` |
+| Platform engineer | Deploy and upgrade platform | Compose, Kubernetes, Terraform, Ansible, ArgoCD |
+
+```archimate
+Business Actor "Financial Analyst" as fa
+Business Actor "IoT Device / Operator" as iot
+Business Service "Financial compliance audit" as audit
+Business Service "IoT telemetry monitoring" as telemetry
+Business Process "PII-aware RAG investigation" as investigation
+Business Process "Windowed telemetry processing" as windows
+fa --> audit
+iot --> telemetry
+audit --> investigation
+telemetry --> windows
+```
+
+## Phase C — Information systems architecture
+
+### Application architecture
+
+The FastAPI application is organized around the ingestion, AI/retrieval, and
+governance bounded contexts under `contexts/`, with shared entities, value
+objects, and events under `domain/`. `app/main.py` composes these services and
+adapters.
+
+### Data architecture
+
+- **MinIO/S3:** immutable JSON audit objects and Spark Parquet output.
+- **ChromaDB:** optional vector collection populated with sanitized chunks and
+  Ollama embeddings.
+- **OpenSearch:** current Compose search adapter for text retrieval.
+- **Elasticsearch:** optional metadata/audit index adapter in `app/metadata.py`.
+- **Kafka:** event transport for `telemetry.ingested`,
+  `transaction.processed`, and `audit.record.logged`.
+- **Spark:** common event envelope parsing, ten-minute watermark, one-minute
+  windows, and append-mode Parquet output.
+
+```archimate
+Application Component "FastAPI DDD service" as api
+Application Component "Ingestion context" as ingestion
+Application Component "AI / Retrieval context" as ai
+Application Component "Governance context" as governance
+Application Component "Kafka publisher" as publisher
+Data Object "Sanitized chunks and embeddings" as vectors
+Data Object "Immutable audit JSON" as audits
+Data Object "Windowed telemetry Parquet" as parquet
+api --> ingestion
+api --> ai
+api --> governance
+ingestion --> publisher
+ai --> vectors
+governance --> audits
+publisher --> parquet
+```
+
+## Phase D — Technology architecture
+
+The technology baseline is container-first and platform-agnostic:
+
+- Docker Compose provides the local reference topology.
+- Kubernetes manifests target a `rag` namespace; they are compatible with
+  K3s when its storage, ingress, and policy choices are supplied.
+- Kafka is configured in KRaft mode; production deployments should use
+  multiple brokers and replication.
+- Spark is the implemented streaming engine; `streaming/flink-job.yaml` is an
+  additional Flink deployment extension point.
+- Terraform provides small AWS/Azure provider starting points.
+- Ansible prepares hybrid hosts and optional NVIDIA tooling.
+- ArgoCD and Argo Rollouts provide GitOps/progressive-delivery scaffolding.
+- Jenkins gates image and IaC changes with Trivy HIGH/CRITICAL scans.
+- cert-manager and NetworkPolicy provide mTLS/zero-trust integration hooks;
+  identity, ingress authentication, and external secrets must be supplied by
+  the target enterprise.
+
+```archimate
+System Software "K3s / Kubernetes" as k8s
+System Software "Docker runtime" as docker
+System Software "Kafka KRaft" as kafka
+System Software "Spark Structured Streaming" as spark
+System Software "MinIO / S3" as object
+System Software "ChromaDB + Ollama" as rag
+System Software "OpenSearch / Elasticsearch" as search
+Technology Service "mTLS and zero-trust network controls" as trust
+docker --> k8s
+k8s --> kafka
+k8s --> spark
+k8s --> object
+k8s --> rag
+k8s --> search
+k8s --> trust
+```
+
+## Phase E — Opportunities and solutions
+
+### Migration roadmap
+
+| Phase | Outcome | Entry/exit criteria |
+| --- | --- | --- |
+| 0. Baseline | Local Compose proof of flow | Tests pass; secrets externalized |
+| 1. Govern | Object lock, PII policy, IAM, TLS | Retention and access evidence reviewed |
+| 2. Stream | Kafka replication and Spark checkpoints | Replay and lag drills pass |
+| 3. Scale | K3s/Kubernetes replicas and managed storage | Load, failover, and restore objectives met |
+| 4. Integrate | Enterprise brokers, IAM, SIEM, CMDB, data catalog | Contract and ownership sign-off |
+| 5. Optimize | Model evaluation, cost controls, canary releases | Quality and SLO dashboards accepted |
+
+### Drop-in enterprise integration patterns
+
+- Replace the Kafka bootstrap endpoint with managed Kafka or an enterprise
+  broker while retaining the event/topic contract.
+- Replace MinIO with AWS S3 or an S3-compatible gateway while preserving
+  object-lock semantics and `s3a://` paths.
+- Point `SEARCH_URL`/`ELASTICSEARCH_URL` at managed search and retain
+  create-only audit metadata writes.
+- Replace Ollama with a governed model gateway behind the same retrieval
+  service boundary; preserve sanitized prompt inputs and audit metadata.
+- Inject secrets through Vault, cloud secret managers, or External Secrets;
+  do not change application code to embed credentials.
+- Add OpenTelemetry/metrics exporters at the platform boundary without
+  coupling domain services to a specific observability vendor.
+
+```archimate
+Plateau "Reference platform" as baseline
+Plateau "Governed enterprise platform" as target
+WorkPackage "Externalize secrets and identity" as identity
+WorkPackage "Replicate Kafka and object storage" as scale
+WorkPackage "Integrate SIEM, catalog, and model gateway" as integrate
+baseline --> identity
+identity --> scale
+scale --> integrate
+integrate --> target
+```
+
+## Architecture governance
+
+Changes to event topics, PII patterns, retention, or adapter contracts require
+architecture review and a documentation update. CI must continue to validate
+tests, image security, and IaC security before GitOps synchronization.
