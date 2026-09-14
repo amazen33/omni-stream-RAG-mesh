@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rag-diagnostic-verifier
+  namespace: rag
+  labels: {app: rag-diagnostic}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata: {labels: {app: rag-diagnostic}}
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: verifier
+            image: ghcr.io/example/hybrid-rag:latest
+            command: ["python", "-m", "ops.diagnostic_verifier"]
+            envFrom:
+            - configMapRef: {name: rag-config}
+            - secretRef: {name: rag-secrets, optional: true}
+            env:
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: kafka-kafka-bootstrap.rag.svc:9092}
+            - {name: SPARK_HEALTH_URL, value: http://rag-spark-history.rag.svc:18080/api/v1/applications}
+            - {name: TELEMETRY_SINK_HEALTH_URL, value: http://minio.rag.svc:9000/minio/health/live}
+            - {name: CHROMA_HEALTH_URL, value: http://chromadb.rag.svc:8000/api/v2/heartbeat}
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}

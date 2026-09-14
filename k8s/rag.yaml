@@ -10,6 +10,10 @@ data:
   AUDIT_BUCKET: rag-audit
   AWS_REGION: us-east-1
   OLLAMA_BASE_URL: http://ollama.rag.svc:11434
+  OLLAMA_MODEL: llama3.2:3b
+  KAFKA_BOOTSTRAP_SERVERS: kafka-kafka-bootstrap.rag.svc:9092
+  CHROMA_URL: http://chromadb.rag.svc:8000
+  HEALTH_CHECK_TIMEOUT_SECONDS: "2"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: {name: rag-data, namespace: rag}
@@ -34,8 +38,9 @@ spec:
         ports: [{containerPort: 8000}]
         envFrom: [{configMapRef: {name: rag-config}}, {secretRef: {name: rag-secrets}}]
         resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "2", memory: 2Gi}}
-        readinessProbe: {httpGet: {path: /readyz, port: 8000}, initialDelaySeconds: 5}
-        livenessProbe: {httpGet: {path: /healthz, port: 8000}, periodSeconds: 20}
+        startupProbe: {httpGet: {path: /health/startup, port: 8000}, failureThreshold: 30, periodSeconds: 5, timeoutSeconds: 3}
+        readinessProbe: {httpGet: {path: /health/ready, port: 8000}, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 3}
+        livenessProbe: {httpGet: {path: /health/live, port: 8000}, periodSeconds: 20, timeoutSeconds: 2}
 ---
 apiVersion: v1
 kind: Service
@@ -54,4 +59,4 @@ spec:
   podSelector: {matchLabels: {app: rag-api}}
   policyTypes: [Ingress, Egress]
   ingress: [{from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}], ports: [{protocol: TCP, port: 8000}]}]
-  egress: [{to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: rag}}}], ports: [{protocol: TCP, port: 9000}, {protocol: TCP, port: 9200}, {protocol: TCP, port: 11434}]}]
+  egress: [{to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: rag}}}], ports: [{protocol: TCP, port: 8000}, {protocol: TCP, port: 9000}, {protocol: TCP, port: 9092}, {protocol: TCP, port: 9200}, {protocol: TCP, port: 11434}]}]

@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir --no-compile -r requirements.txt \
 COPY app ./app
 COPY domain ./domain
 COPY contexts ./contexts
+COPY ops ./ops
 RUN chown -R app:app /app
 USER app
 EXPOSE 8000

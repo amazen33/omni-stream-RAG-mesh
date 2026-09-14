@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging, os, uuid
 from typing import Any, List
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from .redaction import redact
 from .audit import AuditSink
@@ -11,6 +11,8 @@ from contexts.ingestion import IngestionService
 from contexts.ai import RetrievalService
 from contexts.governance import EventPublisher, NullPublisher
 from domain.events import AuditRecordLogged
+from .health import HealthService
+from .metrics import exposition
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
 log = logging.getLogger("rag")
@@ -21,6 +23,7 @@ publisher = EventPublisher() if os.getenv("ENABLE_KAFKA", "false").lower() == "t
 redactor = PIIRedactor(os.getenv("PII_TOKEN_SALT", "change-me"))
 ingestion = IngestionService(redactor, publisher)
 retrieval = RetrievalService(store, publisher=publisher)
+health = HealthService()
 
 
 @app.middleware("http")
@@ -45,13 +48,42 @@ def _chunks(text: str, size: int = 800, overlap: int = 120) -> List[str]:
     splitter = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
     return splitter.split_text(text)
 
+def _health_response(phase: str, response: Response) -> dict[str, object]:
+    report = health.report(phase)
+    if report["status"] != "ok":
+        response.status_code = 503
+    return report
+
+
+@app.get("/health/live")
+def health_live() -> dict[str, object]:
+    # Liveness must never perform network or dependency work.
+    return health.report("live")
+
+
+@app.get("/health/ready")
+def health_ready(response: Response) -> dict[str, object]:
+    return _health_response("ready", response)
+
+
+@app.get("/health/startup")
+def health_startup(response: Response) -> dict[str, object]:
+    return _health_response("startup", response)
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
+    # Keep the original lightweight compatibility contract for existing clients.
     return {"status": "ok"}
 
 @app.get("/readyz")
-def readyz() -> dict[str, str]:
-    return {"status": "ready"}
+def readyz(response: Response) -> dict[str, object]:
+    return _health_response("ready", response)
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(exposition(), media_type="text/plain; version=0.0.4")
 
 @app.post("/ingest-sample")
 def ingest(req: IngestRequest, x_request_id: str | None = Header(default=None)) -> dict[str, Any]:

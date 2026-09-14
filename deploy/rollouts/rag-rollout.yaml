@@ -7,7 +7,7 @@ spec:
   template:
     metadata: {labels: {app: rag-api}}
     spec:
-      containers: [{name: api, image: ghcr.io/example/hybrid-rag:latest, ports: [{containerPort: 8000}], readinessProbe: {httpGet: {path: /readyz, port: 8000}}}]
+      containers: [{name: api, image: ghcr.io/example/hybrid-rag:latest, ports: [{containerPort: 8000}], startupProbe: {httpGet: {path: /health/startup, port: 8000}, failureThreshold: 30, periodSeconds: 5}, readinessProbe: {httpGet: {path: /health/ready, port: 8000}, periodSeconds: 10}, livenessProbe: {httpGet: {path: /health/live, port: 8000}, periodSeconds: 20}}]
   strategy:
     canary:
       steps: [{setWeight: 20}, {pause: {duration: 60}}, {setWeight: 50}, {pause: {duration: 120}}]
