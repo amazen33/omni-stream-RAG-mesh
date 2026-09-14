@@ -4,6 +4,14 @@ import hashlib
 import re
 from typing import Dict, Tuple
 
+class PIIRedactor:
+    """Application-facing redactor; keeps the salt in configuration, never payloads."""
+    def __init__(self, salt: str) -> None:
+        self.salt = salt
+
+    def redact(self, text: str) -> Tuple[str, Dict[str, int]]:
+        return redact(text, self.salt)
+
 PATTERNS = {
     "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
     "phone": re.compile(r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)"),

@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rag-spark-streaming
+  namespace: rag
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: spark
+            image: bitnami/spark:3.5
+            command: ["/opt/bitnami/spark/bin/spark-submit", "/jobs/spark_job.py"]
+            volumeMounts: [{name: jobs, mountPath: /jobs}]
+          volumes: [{name: jobs, configMap: {name: spark-job}}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: spark-job, namespace: rag}
+data:
+  spark_job.py: |
+    # The image mount is replaced by the deployment pipeline with streaming/spark_job.py.
+    print("submit streaming job from the checked-out artifact")

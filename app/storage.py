@@ -8,16 +8,20 @@ class RetrievalStore:
         self.collection = None
         self.search = None
         self.embedder = None
+        self._documents: dict[str, str] = {}
         if os.getenv("ENABLE_VECTOR_STORE", "false").lower() == "true":
-            import chromadb
-            self.collection = chromadb.HttpClient(
-                host=os.getenv("CHROMA_HOST", "chroma"), port=int(os.getenv("CHROMA_PORT", "8000"))
-            ).get_or_create_collection(os.getenv("CHROMA_COLLECTION", "documents"))
-            from langchain_ollama import OllamaEmbeddings
-            self.embedder = OllamaEmbeddings(
-                model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-                base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
-            )
+            try:
+                import chromadb
+                self.collection = chromadb.HttpClient(
+                    host=os.getenv("CHROMA_HOST", "chroma"), port=int(os.getenv("CHROMA_PORT", "8000"))
+                ).get_or_create_collection(os.getenv("CHROMA_COLLECTION", "documents"))
+                from langchain_ollama import OllamaEmbeddings
+                self.embedder = OllamaEmbeddings(
+                    model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+                    base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
+                )
+            except Exception:
+                self.collection = None
         if os.getenv("ENABLE_SEARCH_STORE", "false").lower() == "true":
             from opensearchpy import OpenSearch
             self.search = OpenSearch(
@@ -31,6 +35,7 @@ class RetrievalStore:
                 }}})
 
     def add(self, ids: list[str], documents: list[str], embeddings: list[list[float]] | None = None) -> None:
+        self._documents.update(zip(ids, documents))
         if self.embedder and embeddings is None:
             embeddings = self.embedder.embed_documents(documents)
         if self.collection:
@@ -59,4 +64,11 @@ class RetrievalStore:
                                         body={"size": top_k, "query": {"match": {"text": text}}})
             return [{"text": hit["_source"]["text"], "index": i, "backend": "opensearch"}
                     for i, hit in enumerate(result["hits"]["hits"])]
+        words = set(text.lower().split())
+        matches = sorted(
+            self._documents.values(),
+            key=lambda doc: len(words.intersection(doc.lower().split())),
+            reverse=True,
+        )
+        return [{"text": doc, "index": i, "backend": "memory"} for i, doc in enumerate(matches[:top_k])]
         return []

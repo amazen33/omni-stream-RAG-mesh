@@ -38,4 +38,15 @@ services:
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
       ALLOW_PLAINTEXT_LISTENER: "yes"
     volumes: [kafka_data:/bitnami/kafka]
+  spark:
+    image: bitnami/spark:3.5
+    depends_on: [kafka, minio]
+    volumes:
+      - ./streaming:/opt/bitnami/spark/jobs:ro
+    command: >
+      /opt/bitnami/spark/bin/spark-submit
+      /opt/bitnami/spark/jobs/spark_job.py
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-minioadmin}"
 volumes: {minio_data: {}, os_data: {}, ollama_data: {}, chroma_data: {}, kafka_data: {}}
