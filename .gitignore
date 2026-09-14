@@ -3,3 +3,6 @@
 *.key
 terraform.tfstate*
 .terraform/
+__pycache__/
+*.py[cod]
+.pytest_cache/
