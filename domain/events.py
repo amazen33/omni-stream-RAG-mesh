@@ -46,9 +46,30 @@ class TransactionProcessed(DomainEvent):
 
 
 @dataclass(frozen=True)
+class PaymentTransactionIngested(DomainEvent):
+    """Sanitized payment event contract; raw PAN/CVV never enters this event."""
+
+    topic: ClassVar[str] = "payments.transaction.ingested.v1"
+    transaction_id: str = ""
+    merchant_id: str = ""
+    amount_minor: int = 0
+    currency: str = ""
+    payment_network: str = ""
+    pii_tokenized: bool = True
+
+
+@dataclass(frozen=True)
+class PaymentRiskScored(DomainEvent):
+    topic: ClassVar[str] = "payments.risk.scored.v1"
+    transaction_id: str = ""
+    risk_score: float = 0.0
+    decision: str = "review"
+    model_version: str = ""
+
+
+@dataclass(frozen=True)
 class AuditRecordLogged(DomainEvent):
     topic: ClassVar[str] = "audit.record.logged"
     request_id: str = ""
     object_key: str = ""
     record_type: str = ""
-

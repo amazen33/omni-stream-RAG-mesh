@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "PaymentRiskScored",
+  "namespace": "omni.payments.v1",
+  "fields": [
+    {"name": "event_id", "type": "string"},
+    {"name": "occurred_at", "type": "string"},
+    {"name": "transaction_id", "type": "string"},
+    {"name": "risk_score", "type": "double"},
+    {"name": "decision", "type": "string"},
+    {"name": "model_version", "type": "string"}
+  ]
+}

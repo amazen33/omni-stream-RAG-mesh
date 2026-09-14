@@ -13,6 +13,7 @@ environment-driven integration.
 - [Deployment and infrastructure topology](deployment-topology.md)
 - [Security and trust boundaries](security.md)
 - [Delivery and operations](delivery-operations.md)
+- [Fintech payment streaming](fintech-payments.md)
 - [DDD naming compatibility](ddd-compatibility.md)
 - [TOGAF Architecture Definition](TOGAF_Architecture_Definition.md)
 

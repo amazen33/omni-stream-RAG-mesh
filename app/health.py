@@ -88,8 +88,16 @@ def _ollama() -> None:
     _http(url.rstrip("/") + "/api/tags", has_model)
 
 
+def _schema_registry() -> None:
+    url = os.getenv("SCHEMA_REGISTRY_URL", "")
+    if not url:
+        raise LookupError("not configured")
+    _http(url.rstrip("/") + "/subjects")
+
+
 _CHECKS: dict[str, Callable[[], None]] = {
     "kafka": _kafka,
+    "schema_registry": _schema_registry,
     "chromadb": _chroma,
     "minio": _minio,
     "ollama": _ollama,

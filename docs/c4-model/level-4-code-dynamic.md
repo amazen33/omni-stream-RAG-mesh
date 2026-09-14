@@ -109,3 +109,47 @@ service --> retrieval
 service --> audit
 service --> kafka
 ```
+
+## Payment ingestion and risk sequence
+
+```mermaid
+sequenceDiagram
+    participant PSP as Payment Provider
+    participant Handler as PaymentIngestionService
+    participant PII as Tokenization Interceptor
+    participant SR as Schema Registry
+    participant Kafka as payments.transaction.ingested.v1
+    participant Risk as RiskScoringService
+    participant Audit as Immutable AuditSink
+    PSP->>Handler: payment envelope
+    Handler->>PII: validate and tokenize sensitive identifiers
+    PII-->>Handler: sanitized envelope
+    Handler->>SR: verify schema subject/version
+    Handler->>Kafka: publish keyed event with acks=all
+    Kafka->>Risk: consume transaction event
+    Risk->>Risk: bounded model/anomaly inference
+    Risk->>Audit: score, model metadata, decision
+    Audit-->>Risk: object-lock key
+```
+
+```plantuml
+@startuml
+title C4 Level 4 - payment dynamic flow
+actor "Payment Provider" as psp
+participant "PaymentIngestionService" as handler
+participant "PII tokenization" as pii
+participant "Schema Registry" as registry
+queue "payments.transaction.ingested.v1" as kafka
+participant "RiskScoringService" as risk
+database "Immutable AuditSink" as audit
+psp -> handler : payment envelope
+handler -> pii : validate/tokenize
+pii --> handler : sanitized envelope
+handler -> registry : subject/version check
+handler -> kafka : keyed publish (acks=all)
+kafka -> risk : consume event
+risk -> risk : timeout/bulkhead guarded inference
+risk -> audit : score and model metadata
+audit --> risk : object-lock key
+@enduml
+```

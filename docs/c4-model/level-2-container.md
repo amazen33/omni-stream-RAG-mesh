@@ -59,3 +59,38 @@ api --> minio
 api --> ollama
 spark --> minio
 ```
+
+## Payment containers
+
+```mermaid
+flowchart LR
+    PSP[Payment provider] --> API[FastAPI Domain Service]
+    API --> Registry[Schema Registry]
+    API --> Kafka[Kafka KRaft payment topics]
+    Kafka --> MM2[MirrorMaker 2]
+    Kafka --> Risk[Risk and anomaly scoring worker]
+    Risk --> Audit[Governance audit sink]
+    Risk --> Chroma[ChromaDB vector store]
+    Audit --> Minio[MinIO object lock]
+```
+
+```plantuml
+@startuml
+title C4 Level 2 - payment containers
+actor "Payment provider" as psp
+component "FastAPI Domain Service" as api
+component "Schema Registry" as registry
+queue "Kafka KRaft payment topics" as kafka
+component "MirrorMaker 2" as mm2
+component "Risk and anomaly scoring worker" as risk
+database "ChromaDB vector store" as chroma
+database "Governance audit sink\nMinIO object lock" as audit
+psp --> api
+api --> registry
+api --> kafka
+kafka --> mm2
+kafka --> risk
+risk --> chroma
+risk --> audit
+@enduml
+```

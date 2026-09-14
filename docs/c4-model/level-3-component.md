@@ -70,3 +70,40 @@ ingest --> kafka
 http --> audit
 audit --> object
 ```
+
+## Payment bounded-context components
+
+```mermaid
+flowchart TB
+    Route[Payment ingestion handler] --> Validate[Payment envelope validator]
+    Validate --> Tokenize[PII tokenization interceptor]
+    Tokenize --> Serialize[Avro/Protobuf serializer]
+    Serialize --> Registry[Schema Registry client]
+    Serialize --> Publisher[Payment topic publisher]
+    Publisher --> Risk[Anomaly and risk scoring service]
+    Risk --> Resilience[Bulkhead, rate limiter, timeout]
+    Risk --> Audit[AuditRecordLogged publisher]
+```
+
+```plantuml
+@startuml
+title C4 Level 3 - payment components
+component "Payment ingestion handler" as route
+component "Payment envelope validator" as validate
+component "PII tokenization interceptor" as tokenize
+component "Avro/Protobuf serializer" as serializer
+component "Schema Registry client" as registry
+component "Payment topic publisher" as publisher
+component "Anomaly and risk scoring service" as risk
+component "Bulkhead / rate limiter / timeout" as resilience
+component "AuditRecordLogged publisher" as audit
+route --> validate
+validate --> tokenize
+tokenize --> serializer
+serializer --> registry
+serializer --> publisher
+publisher --> risk
+risk --> resilience
+risk --> audit
+@enduml
+```

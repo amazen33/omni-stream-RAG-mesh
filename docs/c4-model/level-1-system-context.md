@@ -47,3 +47,34 @@ system --> ollama
 system --> storage
 system --> broker
 ```
+
+## Payment streaming extension
+
+```mermaid
+flowchart LR
+    PSP[Payment Service Provider] --> RAG[omni-stream-RAG-mesh]
+    Merchant[Merchant / Risk Analyst] --> RAG
+    RAG --> Kafka[Primary Kafka KRaft]
+    Kafka -. MirrorMaker 2 .-> DR[DR Kafka]
+    RAG --> Registry[Schema Registry]
+    RAG --> LLM[Local or remote governed LLM]
+```
+
+```plantuml
+@startuml
+title C4 Level 1 - payment system context
+actor "Payment Service Provider" as psp
+actor "Merchant / Risk Analyst" as analyst
+rectangle "omni-stream-RAG-mesh" as system
+queue "Primary Kafka KRaft" as kafka
+queue "DR Kafka via MirrorMaker 2" as dr
+component "Schema Registry" as registry
+component "Local or remote governed LLM" as llm
+psp --> system : payment events
+analyst --> system : review and evidence
+system --> kafka
+kafka --> dr
+system --> registry
+system --> llm : sanitized prompts
+@enduml
+```

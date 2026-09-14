@@ -26,3 +26,9 @@ def test_metrics_has_safe_fixed_labels(monkeypatch):
     body = TestClient(app).get("/metrics").text
     assert "rag_health_checks_total" in body
     assert "secret" not in body
+
+
+def test_schema_registry_is_part_of_readiness_when_configured(monkeypatch):
+    monkeypatch.setenv("SCHEMA_REGISTRY_URL", "http://registry.invalid")
+    service = HealthService({"schema_registry": lambda: None})
+    assert service.report("ready")["checks"]["schema_registry"]["status"] == "ok"

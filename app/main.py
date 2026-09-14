@@ -10,6 +10,7 @@ from .redaction import PIIRedactor
 from contexts.ingestion import IngestionService
 from contexts.ai import RetrievalService
 from contexts.governance import EventPublisher, NullPublisher
+from contexts.payments import PaymentIngestionService, RiskScoringService
 from domain.events import AuditRecordLogged
 from .health import HealthService
 from .metrics import exposition
@@ -23,6 +24,8 @@ publisher = EventPublisher() if os.getenv("ENABLE_KAFKA", "false").lower() == "t
 redactor = PIIRedactor(os.getenv("PII_TOKEN_SALT", "change-me"))
 ingestion = IngestionService(redactor, publisher)
 retrieval = RetrievalService(store, publisher=publisher)
+payment_ingestion = PaymentIngestionService(publisher=publisher)
+risk_scoring = RiskScoringService(publisher=publisher)
 health = HealthService()
 
 
@@ -39,6 +42,13 @@ class IngestRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=10000)
     top_k: int = Field(default=4, ge=1, le=20)
+
+class PaymentRequest(BaseModel):
+    transaction_id: str = Field(min_length=1, max_length=128)
+    merchant_id: str = Field(min_length=1, max_length=128)
+    amount_minor: int = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3)
+    payment_network: str = Field(default="unknown", max_length=32)
 
 def request_id(value: str | None) -> str:
     return value or str(uuid.uuid4())
@@ -100,6 +110,16 @@ def ingest(req: IngestRequest, x_request_id: str | None = Header(default=None)) 
         raise HTTPException(503, "audit sink unavailable") from exc
     publisher.publish(AuditRecordLogged(request_id=rid, object_key=key, record_type="ingest"))
     return {"request_id": rid, "chunks": len(chunks), "audit_key": key}
+
+@app.post("/payments/transactions")
+def ingest_payment(req: PaymentRequest, x_request_id: str | None = Header(default=None)) -> dict[str, Any]:
+    """Accept only a tokenized payment envelope, never raw cardholder data."""
+    rid = request_id(x_request_id)
+    event = payment_ingestion.ingest(req.model_dump())
+    score = risk_scoring.score(event)
+    return {"request_id": rid, "transaction_id": event.transaction_id,
+            "risk_score": score.risk_score, "decision": score.decision,
+            "model_version": score.model_version}
 
 @app.post("/ask")
 def ask(req: AskRequest, x_request_id: str | None = Header(default=None)) -> dict[str, Any]:

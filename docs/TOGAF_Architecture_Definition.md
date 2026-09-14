@@ -356,6 +356,63 @@ integrate --> optimize
 
 ## Architecture governance
 
+### Fintech payment-streaming extension
+
+The payment profile specializes each ADM phase without changing the platform
+trust model. Phase A adds payment service providers, merchants, fraud teams,
+and card-network obligations. Phase B adds authorization, settlement,
+chargeback, and anomaly-review value streams. Phase C adds the
+`contexts/payments` bounded context, versioned Avro subjects, Schema Registry,
+and `payments.*.v1` topics. Phase D adds TLS/SASL Kafka, three-broker KRaft
+failure domains, Schema Registry, MirrorMaker 2, and LGTM telemetry. Phase E
+promotes from a synthetic non-cardholder-data stream to regional active/passive
+DR, replay drills, and governed model rollout.
+
+```archimate
+Business Actor "Payment Service Provider" as psp
+Business Process "Authorize and settle payment" as payment
+Application Component "Payment ingestion context" as ingest
+Application Component "AI anomaly and risk scoring" as risk
+Application Component "Schema Registry" as registry
+System Software "Kafka KRaft + MirrorMaker 2" as kafka
+Technology Object "Object-lock audit storage" as audit
+psp --> payment
+payment --> ingest
+ingest --> registry
+ingest --> kafka
+kafka --> risk
+risk --> audit
+```
+
+```mermaid
+flowchart LR
+    PSP[Payment Service Provider] --> Ingest[Payment ingestion DDD context]
+    Ingest --> Registry[Schema Registry<br/>Avro or Protobuf]
+    Registry --> Kafka[Kafka KRaft<br/>payments.*.v1]
+    Kafka --> Risk[LLM anomaly and risk scoring]
+    Kafka -. MirrorMaker 2 .-> DR[DR Kafka cluster]
+    Risk --> Audit[Governance + immutable audit]
+```
+
+```plantuml
+@startuml
+title Fintech payment streaming - technology and migration
+actor "Payment Service Provider" as psp
+component "Payment ingestion context" as ingest
+component "Schema Registry\nAvro/Protobuf" as registry
+queue "Kafka KRaft\npayments.*.v1" as kafka
+component "Anomaly and risk scoring" as risk
+queue "DR Kafka\nMirrorMaker 2" as dr
+database "Object-lock audit" as audit
+psp --> ingest
+ingest --> registry
+ingest --> kafka
+kafka --> risk
+kafka --> dr
+risk --> audit
+@enduml
+```
+
 Changes to event topics, PII patterns, retention, or adapter contracts require
 architecture review and a documentation update. CI must continue to validate
 tests, image security, and IaC security before GitOps synchronization.
