@@ -21,6 +21,11 @@ explicit, secret-driven operations; see
 exec rag-api sh` is the supported local debugging shell; the image does not
 include or run an SSH daemon.
 
+For Windows local development, use Python 3.12 (preferred) or 3.13. Python
+3.14 is not supported for the pinned native dependencies; see
+[`docs/windows-python.md`](docs/windows-python.md). The local-only PowerShell
+launcher accepts `-PythonPath` to select an installed supported interpreter.
+
 ## Domain layout
 `contexts/ingestion`, `contexts/ai`, and `contexts/governance` are bounded contexts.
 The immutable integration events `TelemetryIngested`, `TransactionProcessed`, and
