@@ -21,38 +21,6 @@ explicit, secret-driven operations; see
 exec rag-api sh` is the supported local debugging shell; the image does not
 include or run an SSH daemon.
 
-## Windows local execution
-
-`scripts/run-local.ps1` is a Windows PowerShell 5.1-compatible launcher. It
-defaults to `E:\omni-stream-RAG-mesh`, clones the repository there when absent,
-and performs only a fast-forward Git update when the checkout is clean. It
-creates `.venv`, copies `.env.example` to `.env` only when `.env` is absent,
-and never prints or overwrites existing secrets.
-
-From PowerShell:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\run-local.ps1 -Install
-.\scripts\run-local.ps1 -Port 8080 -Host 0.0.0.0 -SkipUpdate
-```
-
-Use `-ProjectPath C:\work\omni-stream-RAG-mesh` to override the E: drive
-default, `-SkipClone` when the path must already exist, and `-SkipUpdate` to
-leave a clean checkout untouched. Replace placeholder values in `.env` before
-enabling integrations. To start only the local Compose dependencies while the
-API runs under uvicorn, use `-DockerCompose` (Docker Desktop and Compose v2
-must already be installed):
-
-```powershell
-.\scripts\run-local.ps1 -Install -DockerCompose
-```
-
-Stop the API with `Ctrl+C`; stop optional Compose dependencies with
-`docker compose down` from the project directory. Remove `.venv` only when
-rebuilding the environment is intended (`Remove-Item -Recurse -Force .venv`);
-keep `.env` unless its secrets are being rotated.
-
 ## Domain layout
 `contexts/ingestion`, `contexts/ai`, and `contexts/governance` are bounded contexts.
 The immutable integration events `TelemetryIngested`, `TransactionProcessed`, and
