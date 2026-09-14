@@ -16,7 +16,9 @@ flowchart LR
 `.github/workflows/ci.yml` runs tests, builds the image, and blocks on unfixed
 HIGH/CRITICAL Trivy image and IaC findings with read-only repository
 permissions. `.github/workflows/publish-deploy.yml` only publishes on a
-version tag or explicit dispatch, and deploys only when the protected
+version tag or explicit dispatch; it loads the image, applies the same
+HIGH/CRITICAL Trivy image gate, and pushes only after that scan passes. It
+deploys only when the protected
 `production` environment and `KUBE_CONFIG` secret are supplied. `Jenkinsfile`
 provides the same gates; publishing is opt-in parameters using Jenkins
 credentials. No credentials belong in repository files.

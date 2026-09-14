@@ -29,8 +29,9 @@ def _kafka() -> None:
     value = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
     if not value:
         raise LookupError
-    host, _, port = value.split(",", 1)[0].rpartition(":")
-    with socket.create_connection((host or port, int(port if host else "9092")), timeout=_timeout()):
+    endpoint = value.split(",", 1)[0].strip()
+    host, _, port = endpoint.rpartition(":")
+    with socket.create_connection((host or endpoint, int(port or "9092")), timeout=_timeout()):
         return
 
 

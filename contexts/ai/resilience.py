@@ -59,12 +59,15 @@ class ResiliencePolicy:
         if not self._bulkhead.acquire(blocking=False):
             raise BulkheadRejected("retrieval concurrency limit reached")
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(operation)
-                try:
-                    return future.result(timeout=self.timeout_seconds)
-                except TimeoutError as exc:
-                    future.cancel()
-                    raise CallTimedOut("retrieval dependency timed out") from exc
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(operation)
+            try:
+                return future.result(timeout=self.timeout_seconds)
+            except TimeoutError as exc:
+                future.cancel()
+                raise CallTimedOut("retrieval dependency timed out") from exc
+            finally:
+                # Do not wait for an uncooperative dependency after the timeout.
+                executor.shutdown(wait=False, cancel_futures=True)
         finally:
             self._bulkhead.release()

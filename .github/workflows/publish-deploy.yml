@@ -31,11 +31,23 @@ jobs:
         name: Define image
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
+          push: false
           tags: ${{ steps.meta.outputs.image }}
+      - name: Scan published image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Push scanned image
+        run: docker push "${{ steps.meta.outputs.image }}"
 
   deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.deploy

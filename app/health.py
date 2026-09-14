@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import time
+import base64
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urlparse
@@ -92,7 +93,14 @@ def _schema_registry() -> None:
     url = os.getenv("SCHEMA_REGISTRY_URL", "")
     if not url:
         raise LookupError("not configured")
-    _http(url.rstrip("/") + "/subjects")
+    request = Request(url.rstrip("/") + "/subjects", headers={"User-Agent": "rag-health/1"})
+    key, secret = os.getenv("SCHEMA_REGISTRY_API_KEY"), os.getenv("SCHEMA_REGISTRY_API_SECRET")
+    if key and secret:
+        token = base64.b64encode(f"{key}:{secret}".encode("utf-8")).decode("ascii")
+        request.add_header("Authorization", f"Basic {token}")
+    with urlopen(request, timeout=_timeout()) as response:
+        if response.status >= 400:
+            raise RuntimeError("unhealthy response")
 
 
 _CHECKS: dict[str, Callable[[], None]] = {

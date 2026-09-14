@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from contexts.payments import PaymentIngestionService, RiskScoringService
+from contexts.ai.resilience import ResiliencePolicy
+from contexts.payments import AnomalyDetectionService, PaymentIngestionService, RiskScoringService
 from app.main import app
 
 
@@ -36,6 +37,22 @@ def test_payment_validation_rejects_negative_amount():
         PaymentIngestionService().ingest(
             {"transaction_id": "tx-3", "merchant_id": "m-3", "amount_minor": -1, "currency": "USD"}
         )
+
+
+def test_risk_scoring_fails_closed_when_policy_rejects():
+    policy = ResiliencePolicy(rate_per_second=1)
+    policy._take_token()
+    event = PaymentIngestionService().ingest(
+        {"transaction_id": "tx-5", "merchant_id": "m-5", "amount_minor": 10, "currency": "USD"}
+    )
+    assert RiskScoringService(resilience=policy).score(event).decision == "review"
+
+
+def test_anomaly_detector_timeout_is_review_signal():
+    detector = AnomalyDetectionService(detector=lambda _: (_ for _ in ()).throw(RuntimeError("offline")))
+    assert detector.detect(PaymentIngestionService().ingest(
+        {"transaction_id": "tx-6", "merchant_id": "m-6", "amount_minor": 10, "currency": "USD"}
+    )) is True
 
 
 def test_payment_route_returns_risk_decision_without_raw_card_fields():

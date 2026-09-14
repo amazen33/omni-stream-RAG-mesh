@@ -8,10 +8,13 @@ only checks whose configuration is present; an absent integration is reported as
 `disabled`. A configured failure returns HTTP 503. Checks have a bounded
 `HEALTH_CHECK_TIMEOUT_SECONDS` (default 2 seconds, maximum 10).
 
-Supported settings are `KAFKA_BOOTSTRAP_SERVERS`, `CHROMA_URL` (or
-`CHROMA_HOST`), `S3_ENDPOINT_URL` (or `MINIO_ENDPOINT_URL`),
-`OLLAMA_BASE_URL`, and `OLLAMA_MODEL`. Responses contain only status and
-duration; endpoint URLs, credentials, and exception text are never returned.
+Supported settings are `KAFKA_BOOTSTRAP_SERVERS`, `SCHEMA_REGISTRY_URL`
+(optionally `SCHEMA_REGISTRY_API_KEY` and `SCHEMA_REGISTRY_API_SECRET`),
+`CHROMA_URL` (or `CHROMA_HOST`), `S3_ENDPOINT_URL` (or
+`MINIO_ENDPOINT_URL`), `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`. The Ollama URL
+may point to a local or governed remote endpoint. Responses contain only
+status and duration; endpoint URLs, credentials, and exception text are never
+returned.
 `/healthz` and `/readyz` remain available for older deployments.
 
 ## Prometheus and LGTM

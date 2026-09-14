@@ -28,6 +28,10 @@ Payment events contain tokenized identifiers and amount-in-minor-units. PAN,
 CVV, authorization secrets, and raw request bodies are not event fields. The
 publisher must enforce `acks=all`, idempotent producer settings, a stable
 `event_id`, and a key of `transaction_id` to preserve per-transaction order.
+The reviewable baseline is in
+[`infrastructure/fintech/kafka-production.yaml`](../infrastructure/fintech/kafka-production.yaml);
+partition count, retention, and quotas must be capacity-tested for the target
+payment volume.
 
 ## Streaming backbone
 
@@ -84,6 +88,9 @@ real cardholder data for probes.
 - Apply bounded bulkheads, token-bucket rate limits, and timeouts around
   registry, vector, and LLM calls. A timeout or rejected inference produces a
   review-safe fallback, never an allow decision.
+- The payment anomaly adapter is intentionally fail-closed: unavailable or
+  rate-limited detection signals `review`; it cannot silently authorize a
+  transaction.
 - Test broker loss, registry unavailability, delayed model responses, duplicate
   events, and MirrorMaker lag with deterministic chaos tests before promotion.
 - Keep immutable audit objects and model metadata in the retention-controlled

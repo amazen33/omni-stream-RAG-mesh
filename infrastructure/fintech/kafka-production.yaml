@@ -1,0 +1,25 @@
+# Reviewable production-settings baseline. Apply through the selected Kafka
+# operator/platform; do not copy credentials into this file.
+topic_defaults:
+  replication_factor: 3
+  min_insync_replicas: 2
+  partitions: 12
+  cleanup_policy: delete
+  retention_ms: 604800000
+producer:
+  acks: all
+  enable_idempotence: true
+  compression_type: zstd
+  linger_ms: 5
+  max_in_flight_requests_per_connection: 5
+  key: transaction_id
+security:
+  protocol: SASL_SSL
+  mechanisms: [SCRAM-SHA-512]
+  acl_principle: payments-producer
+  auto_topic_creation: false
+disaster_recovery:
+  replication: MirrorMaker2
+  topics_pattern: "^payments\\..*"
+  consumer_groups_pattern: "^payments-.*"
+  target_minimum_lag_alert_seconds: 30

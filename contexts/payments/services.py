@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from domain.events import PaymentRiskScored, PaymentTransactionIngested
+from contexts.ai.resilience import ResilienceError, ResiliencePolicy
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,15 @@ class RiskScoringService:
 
     model_version: str = "baseline-v1"
     publisher: Any | None = None
+    resilience: ResiliencePolicy | None = None
 
     def score(self, event: PaymentTransactionIngested) -> PaymentRiskScored:
-        score = min(1.0, round(event.amount_minor / 1_000_000, 4))
-        decision = "review" if score >= 0.7 else "allow"
+        policy = self.resilience or ResiliencePolicy()
+        try:
+            score = policy.call(lambda: min(1.0, round(event.amount_minor / 1_000_000, 4)))
+            decision = "review" if score >= 0.7 else "allow"
+        except ResilienceError:
+            score, decision = 0.0, "review"
         result = PaymentRiskScored(
             transaction_id=event.transaction_id,
             risk_score=score,
@@ -52,3 +58,20 @@ class RiskScoringService:
         if self.publisher:
             self.publisher.publish(result)
         return result
+
+
+@dataclass(frozen=True)
+class AnomalyDetectionService:
+    """Governed anomaly adapter with a fail-closed review decision."""
+
+    detector: Any | None = None
+    resilience: ResiliencePolicy | None = None
+
+    def detect(self, event: PaymentTransactionIngested) -> bool:
+        if self.detector is None:
+            return False
+        policy = self.resilience or ResiliencePolicy()
+        try:
+            return bool(policy.call(lambda: self.detector(event)))
+        except (ResilienceError, RuntimeError):
+            return True
