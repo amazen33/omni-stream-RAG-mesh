@@ -54,6 +54,22 @@ savepoints, and a highly available ingress. Optional adapters fail closed or
 fall back to in-memory behavior according to their implementation; verify
 that fallback is acceptable before enabling production traffic.
 
+Retrieval calls use dependency-free equivalents of Resilience4j patterns:
+`contexts/ai/resilience.py` applies a bounded bulkhead, token-bucket rate
+limiter, and timeout around vector retrieval and Ollama inference. Timeouts and
+rejections return the configured safe fallback answer rather than cascading
+into request failure. Configure limits by constructing `ResiliencePolicy` in
+the service composition layer; keep values aligned with worker capacity and
+LLM provider quotas. The Python implementation is intentional because this
+service is Python; Resilience4j is the equivalent pattern name for JVM
+integrations, not an added runtime dependency.
+
+The scheduled `.github/workflows/chaos.yml` job runs deterministic failure
+injection tests under `tests/chaos/`. It validates slow model behavior and
+fallback isolation without requiring live cloud services. Run the same suite
+in a staging cluster with network faults, broker unavailability, vector-store
+latency, and Ollama saturation before enabling production changes.
+
 ## Disaster recovery
 
 Back up and periodically restore MinIO/S3 audit objects, Parquet data and
