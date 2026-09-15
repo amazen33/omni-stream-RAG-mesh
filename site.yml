@@ -1,0 +1,25 @@
+- hosts master
+  become yes
+  tasks
+    - name Install K3s Master
+      shell curl -sfL httpsget.k3s.io  sh -
+      args
+        creates usrlocalbink3s
+
+    - name Get K3s Node Token
+      slurp
+        src varlibrancherk3sservernode-token
+      register k3s_token_file
+
+    - name Set token fact
+      set_fact
+        k3s_token {{ k3s_token_file['content']  b64decode  trim }}
+
+- hosts workers
+  become yes
+  tasks
+    - name Install K3s Worker and Join Cluster
+      shell 
+        curl -sfL httpsget.k3s.io  K3S_URL=https{{ hostvars['desktop-worker']['ansible_host']  default('127.0.0.1') }}6443 K3S_TOKEN={{ hostvars['desktop-worker']['k3s_token'] }} sh -
+      args
+        creates usrlocalbink3s
