@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-kafka
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kafka
+spec:
+  serviceName: {{ include "omni-stream-RAG-mesh.fullname" . }}-kafka-headless
+  replicas: {{ .Values.kafka.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: kafka
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: "{{ .Values.kafka.image.repository }}:{{ .Values.kafka.image.tag }}"
+          imagePullPolicy: {{ .Values.kafka.image.pullPolicy }}
+          ports:
+            - name: client
+              containerPort: {{ .Values.kafka.service.port }}
+              protocol: TCP
+            - name: controller
+              containerPort: {{ .Values.kafka.service.controllerPort }}
+              protocol: TCP
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://{{ include "omni-stream-RAG-mesh.fullname" . }}-kafka:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@{{ include "omni-stream-RAG-mesh.fullname" . }}-kafka:9093"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+            - name: CLUSTER_ID
+              value: {{ .Values.kafka.clusterId | quote }}
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+          resources:
+            {{- toYaml .Values.kafka.resources | nindent 12 }}
+  {{- if .Values.kafka.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+        labels:
+          {{- include "omni-stream-RAG-mesh.labels" . | nindent 10 }}
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.kafka.persistence.size }}
+  {{- end }}

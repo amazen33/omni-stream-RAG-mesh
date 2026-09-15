@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-ollama
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-worker
+spec:
+  serviceName: {{ include "omni-stream-RAG-mesh.fullname" . }}-ollama-headless
+  replicas: {{ .Values.ollama.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ollama-worker
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama-worker
+    spec:
+      {{- with .Values.ollama.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ollama
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Start Ollama server in the background
+              ollama serve &
+              SERVER_PID=$!
+
+              echo "Waiting for Ollama daemon to initialize..."
+              until curl -s http://127.0.0.1:11434/api/version >/dev/null; do
+                sleep 2
+              done
+              echo "Ollama daemon ready."
+
+              {{- if .Values.ollama.autoPullModels }}
+              # Pre-pull required RAG models into persistent cache
+              {{- range .Values.ollama.models }}
+              echo "Checking and pulling model: {{ . }}..."
+              ollama pull {{ . }}
+              {{- end }}
+              {{- end }}
+
+              # Keep server running as main process
+              wait $SERVER_PID
+          ports:
+            - name: http
+              containerPort: {{ .Values.ollama.service.port }}
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: OLLAMA_MODELS
+              value: "/root/.ollama/models"
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ollama.resources | nindent 12 }}
+  {{- if .Values.ollama.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: ollama-models
+        labels:
+          {{- include "omni-stream-RAG-mesh.labels" . | nindent 10 }}
+          app.kubernetes.io/component: ollama-worker
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ollama.persistence.size }}
+  {{- end }}

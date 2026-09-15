@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-minio
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  replicas: {{ .Values.minio.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: minio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+          command:
+            - minio
+            - server
+            - /data
+            - --console-address
+            - :9001
+          ports:
+            - name: api
+              containerPort: {{ .Values.minio.service.apiPort }}
+              protocol: TCP
+            - name: console
+              containerPort: {{ .Values.minio.service.consolePort }}
+              protocol: TCP
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-secrets
+                  key: MINIO_ROOT_PASSWORD
+          volumeMounts:
+            - name: minio-storage
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: api
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+      volumes:
+        - name: minio-storage
+          {{- if .Values.minio.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "omni-stream-RAG-mesh.fullname" . }}-minio-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

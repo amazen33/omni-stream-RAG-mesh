@@ -1,3 +1,28 @@
+<<<<<<< HEAD
+# C4 Architecture Model: Omni-Stream RAG Mesh
+
+This directory documents the software architecture of the Omni-Stream RAG Mesh platform using the **C4 Model** (Context, Containers, Components, and Deployment).
+
+```
+Level 1: System Context  ──> Who uses the system and how does it fit into the world?
+    │
+    ▼
+Level 2: Container       ──> What are the high-level deployable units (FastAPI, Kafka, MinIO, Chroma, Ollama)?
+    │
+    ▼
+Level 3: Component       ──> How is the FastAPI Gateway structured internally (Bulkhead, Circuit Breaker, Audit)?
+    │
+    ▼
+Level 4: Deployment      ──> How are containers mapped onto the Hyper-V VMs and K3s cluster nodes?
+```
+
+## Diagram Index
+
+1. [Level 1: System Context Diagram](01-system-context.md)
+2. [Level 2: Container Diagram](02-container.md)
+3. [Level 3: Component Diagram (FastAPI RAG Gateway)](03-component.md)
+4. [Level 4: Deployment Diagram (Hyper-V & K3s)](04-deployment.md)
+=======
 # C4 model notation guide
 
 The four C4 pages describe the same implementation at progressively finer
@@ -23,3 +48,4 @@ The diagrams are descriptive views of repository components, not additional
 runtime dependencies. Optional adapters remain controlled by environment flags
 such as `ENABLE_KAFKA`, `ENABLE_VECTOR_STORE`, `ENABLE_SEARCH_STORE`,
 `ENABLE_METADATA_INDEX`, and `ENABLE_OLLAMA_INFERENCE`.
+>>>>>>> 326eae92028aa5e56d0e35de134f27355dcba79d

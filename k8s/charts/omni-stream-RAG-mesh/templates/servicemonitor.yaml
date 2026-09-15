@@ -1,0 +1,19 @@
+{{- if .Values.observability.serviceMonitor.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-servicemonitor
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    release: prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fastapi
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.observability.serviceMonitor.interval | default "15s" }}
+      scrapeTimeout: 10s
+{{- end }}

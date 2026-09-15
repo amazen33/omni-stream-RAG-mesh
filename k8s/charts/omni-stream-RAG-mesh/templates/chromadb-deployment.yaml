@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-chromadb
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chromadb
+spec:
+  replicas: {{ .Values.chromadb.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: chromadb
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: chromadb
+    spec:
+      containers:
+        - name: chromadb
+          image: "{{ .Values.chromadb.image.repository }}:{{ .Values.chromadb.image.tag }}"
+          imagePullPolicy: {{ .Values.chromadb.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.chromadb.service.port }}
+              protocol: TCP
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: PERSIST_DIRECTORY
+              value: "/chroma/chroma"
+            - name: ANONYMIZED_TELEMETRY
+              value: "FALSE"
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /chroma/chroma
+          livenessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.chromadb.resources | nindent 12 }}
+      volumes:
+        - name: chroma-data
+          {{- if .Values.chromadb.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "omni-stream-RAG-mesh.fullname" . }}-chromadb-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

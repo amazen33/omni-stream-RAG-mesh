@@ -1,0 +1,68 @@
+---
+# =============================================================================
+# Role: k3s_server - Control Plane Bootstrap & Token Registration
+# =============================================================================
+
+- name: Check if K3s server service is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Download and install K3s server
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ k3s_version }}" INSTALL_K3S_EXEC="server \
+      --write-kubeconfig-mode 644 \
+      --node-ip {{ ansible_host }} \
+      --advertise-address {{ ansible_host }} \
+      --flannel-backend=vxlan \
+      --container-runtime-endpoint unix:///run/containerd/containerd.sock" sh -
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+  when: not k3s_binary.stat.exists
+
+- name: Ensure K3s server service is running and enabled
+  ansible.builtin.systemd:
+    name: k3s
+    state: started
+    enabled: yes
+
+- name: Wait for K3s node token to be generated
+  ansible.builtin.wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+    state: present
+    timeout: 60
+
+- name: Read cluster node token from master
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: node_token_raw
+
+- name: Register k3s_token fact across all cluster hosts
+  ansible.builtin.set_fact:
+    k3s_token: "{{ node_token_raw.content | b64decode | trim }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups['k8s_cluster'] }}"
+
+- name: Ensure ~/.kube directory exists for ubuntu user
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+
+- name: Copy kubeconfig to user home directory
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Fetch kubeconfig to local management workstation
+  ansible.builtin.fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ playbook_dir }}/kubeconfig-cluster.yaml"
+    flat: yes

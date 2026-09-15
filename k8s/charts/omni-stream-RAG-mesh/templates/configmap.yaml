@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-config
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+data:
+  OLLAMA_BASE_URL: "http://{{ include "omni-stream-RAG-mesh.fullname" . }}-ollama:{{ .Values.ollama.service.port }}"
+  CHROMA_SERVER_HOST: "{{ include "omni-stream-RAG-mesh.fullname" . }}-chromadb"
+  CHROMA_SERVER_HTTP_PORT: "{{ .Values.chromadb.service.port }}"
+  KAFKA_BOOTSTRAP_SERVERS: "{{ include "omni-stream-RAG-mesh.fullname" . }}-kafka:{{ .Values.kafka.service.port }}"
+  MINIO_ENDPOINT: "{{ include "omni-stream-RAG-mesh.fullname" . }}-minio:{{ .Values.minio.service.apiPort }}"
+  DEFAULT_LLM_MODEL: {{ .Values.fastapi.env.DEFAULT_LLM_MODEL | quote }}
+  DEFAULT_EMBED_MODEL: {{ .Values.fastapi.env.DEFAULT_EMBED_MODEL | quote }}

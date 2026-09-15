@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# Master Ansible Playbook: 3-Node K3s Cluster Configuration & Bootstrap
+# =============================================================================
+
+# Phase 1: Common Hardening & Container Runtime Setup across all nodes
+- name: Hardening, Swap Disablement, and Kernel Modules Configuration
+  hosts: k8s_cluster
+  gather_facts: true
+  become: true
+  roles:
+    - role: common
+    - role: containerd
+
+# Phase 2: K3s Master Node Bootstrap & Registration Token Extraction
+- name: Initialize K3s Control Plane Node
+  hosts: masters
+  gather_facts: true
+  become: true
+  roles:
+    - role: k3s_server
+
+# Phase 3: Automated Token Joining for Worker Nodes
+- name: Join Worker Nodes to K3s Cluster
+  hosts: workers
+  gather_facts: true
+  become: true
+  roles:
+    - role: k3s_agent
+
+# Phase 4: Cluster Health Verification & Node Readiness Validation
+- name: Validate Cluster Readiness
+  hosts: masters
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wait for all 3 cluster nodes to reach 'Ready' status
+      ansible.builtin.command: kubectl get nodes --no-headers
+      register: cluster_nodes
+      until:
+        - cluster_nodes.stdout_lines | length == 3
+        - not ('NotReady' in cluster_nodes.stdout)
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Display Cluster Node Summary
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: node_status
+      changed_when: false
+
+    - name: Print Kubernetes Cluster Nodes
+      ansible.builtin.debug:
+        msg: "{{ node_status.stdout_lines }}"

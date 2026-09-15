@@ -1,20 +1,66 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+<<<<<<< HEAD
+  name: omni-stream-rag-mesh
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: omni-stream-rag-mesh
+    app.kubernetes.io/part-of: rag-mesh-platform
+    environment: production
+=======
   name: hybrid-rag
   namespace: argocd
+>>>>>>> 326eae92028aa5e56d0e35de134f27355dcba79d
 spec:
   project: default
   source:
     repoURL: https://github.com/amazen33/omni-stream-RAG-mesh.git
+<<<<<<< HEAD
+    targetRevision: HEAD
+    path: k8s/charts/omni-stream-RAG-mesh
+    helm:
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: global.environment
+          value: production
+        - name: fastapi.replicaCount
+          value: "2"
+        - name: ollama.replicaCount
+          value: "2"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rag-mesh
+
+=======
     targetRevision: main
     path: k8s
   destination:
     server: https://kubernetes.default.svc
     namespace: rag
+>>>>>>> 326eae92028aa5e56d0e35de134f27355dcba79d
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+<<<<<<< HEAD
+      allowEmpty: false
     syncOptions:
       - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+=======
+    syncOptions:
+      - CreateNamespace=true
+>>>>>>> 326eae92028aa5e56d0e35de134f27355dcba79d

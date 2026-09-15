@@ -1,0 +1,57 @@
+{{- if .Values.minio.auditTrail.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-minio-audit-init
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-audit-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: "minio/mc:RELEASE.2024-03-30T15-21-42Z"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-secrets
+                  key: MINIO_ROOT_PASSWORD
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for MinIO endpoint to become accessible..."
+              until mc alias set myminio http://{{ include "omni-stream-RAG-mesh.fullname" . }}-minio:{{ .Values.minio.service.apiPort }} "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "Retrying MinIO connection in 3s..."
+                sleep 3
+              done
+
+              BUCKET_NAME="{{ .Values.minio.auditTrail.bucketName | default "rag-audit-trail" }}"
+
+              echo "Checking if audit bucket '$BUCKET_NAME' exists..."
+              if ! mc ls myminio/$BUCKET_NAME > /dev/null 2>&1; then
+                echo "Creating audit bucket '$BUCKET_NAME' with Object Lock enabled..."
+                mc mb --with-lock myminio/$BUCKET_NAME
+              else
+                echo "Audit bucket '$BUCKET_NAME' already exists."
+              fi
+
+              echo "Enforcing WORM compliance retention on audit logs (30 days)..."
+              mc retention set --default COMPLIANCE 30d myminio/$BUCKET_NAME
+              echo "MinIO immutable audit storage initialized successfully."
+{{- end }}

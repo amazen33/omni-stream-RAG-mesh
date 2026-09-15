@@ -1,0 +1,18 @@
+{{- if .Values.minio.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-minio-pvc
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size }}
+{{- end }}

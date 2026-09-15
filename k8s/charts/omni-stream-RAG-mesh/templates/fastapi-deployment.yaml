@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-fastapi
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fastapi
+spec:
+  replicas: {{ .Values.fastapi.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fastapi
+  template:
+    metadata:
+      labels:
+        {{- include "omni-stream-RAG-mesh.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fastapi
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: fastapi
+          image: "{{ .Values.fastapi.image.repository }}:{{ .Values.fastapi.image.tag }}"
+          imagePullPolicy: {{ .Values.fastapi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.fastapi.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "omni-stream-RAG-mesh.fullname" . }}-config
+            - secretRef:
+                name: {{ include "omni-stream-RAG-mesh.fullname" . }}-secrets
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.fastapi.resources | nindent 12 }}

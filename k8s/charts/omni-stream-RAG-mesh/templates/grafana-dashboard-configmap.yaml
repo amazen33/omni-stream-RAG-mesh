@@ -1,0 +1,80 @@
+{{- if .Values.observability.dashboard.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omni-stream-RAG-mesh.fullname" . }}-dashboard
+  labels:
+    {{- include "omni-stream-RAG-mesh.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  rag-mesh-boundary-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "title": "RAG Mesh - Boundary Observability & Failure Resilience",
+      "tags": ["rag", "lgtm", "resilience", "circuit-breaker"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "version": 1,
+      "panels": [
+        {
+          "title": "Bulkhead Active Slots (In-Flight Work)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "rag_bulkhead_active_slots",
+              "legendFormat": "{{service}} - active slots"
+            }
+          ]
+        },
+        {
+          "title": "Circuit Breaker State (0=Closed, 1=Half-Open, 2=Open)",
+          "type": "stat",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+          "targets": [
+            {
+              "expr": "rag_circuit_breaker_state",
+              "legendFormat": "{{service}}"
+            }
+          ]
+        },
+        {
+          "title": "Circuit Breaker Trips & Bulkhead Saturation",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+          "targets": [
+            {
+              "expr": "rate(rag_circuit_breaker_tripped_total[5m])",
+              "legendFormat": "{{service}} breaker trips/sec"
+            },
+            {
+              "expr": "rate(rag_bulkhead_saturated_total[5m])",
+              "legendFormat": "{{service}} bulkhead saturation rejections/sec"
+            }
+          ]
+        },
+        {
+          "title": "Downstream Boundary Latency Quantiles (p50, p90, p99)",
+          "type": "timeseries",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(rag_downstream_boundary_latency_seconds_bucket[5m])) by (le, boundary, status))",
+              "legendFormat": "p50 - {{boundary}} ({{status}})"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(rag_downstream_boundary_latency_seconds_bucket[5m])) by (le, boundary, status))",
+              "legendFormat": "p90 - {{boundary}} ({{status}})"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(rag_downstream_boundary_latency_seconds_bucket[5m])) by (le, boundary, status))",
+              "legendFormat": "p99 - {{boundary}} ({{status}})"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}
