@@ -52,6 +52,27 @@ publisher --> topics
 @enduml
 ```
 
+## Correlation and compensation components
+
+```mermaid
+flowchart LR
+    Middleware[HTTP correlation middleware] --> Routes[FastAPI routes]
+    Routes --> Lifecycle[StateTransitionLogged]
+    Routes --> Policy[ResiliencePolicy]
+    Policy --> Metrics[Prometheus boundary metrics]
+    Policy --> Failure[Compensating event]
+    Lifecycle --> Publisher[Kafka header publisher]
+    Failure --> Publisher
+    Lifecycle --> Audit[AuditSink transitions]
+    Failure --> Audit[AuditSink compensation]
+```
+
+`DomainEvent` owns the immutable payload identity and Kafka header contract.
+`EventPublisher` permits non-reserved custom headers but will not allow an
+injected header to replace correlation, causation, event type, event ID, or
+trace context. The routes use the detailed retrieval outcome to retain a safe
+answer while recording failure compensation.
+
 ```archimate
 Application Component "HTTP routes" as http
 Application Component "Ingestion Handlers" as ingest
