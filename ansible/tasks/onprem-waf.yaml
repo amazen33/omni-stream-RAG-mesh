@@ -1,0 +1,37 @@
+---
+# K3s installs Traefik as a HelmChart. This configuration keeps the external
+# WAF at the edge and forwards only to Istio's private ingress gateway.
+- name: Copy K3s Traefik WAF plugin configuration
+  ansible.builtin.copy:
+    src: "{{ rag_source_dir | default(playbook_dir ~ '/..') }}/waf/traefik-helmchartconfig.yaml"
+    dest: "{{ rag_remote_dir }}/traefik-helmchartconfig.yaml"
+    mode: '0644'
+
+- name: Configure Traefik to permit the WAF route to the Istio namespace
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['apply', '-f', rag_remote_dir ~ '/traefik-helmchartconfig.yaml'] }}"
+  register: traefik_config_apply
+  changed_when: "'created' in traefik_config_apply.stdout or 'configured' in traefik_config_apply.stdout"
+
+- name: Wait for Traefik after WAF configuration
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['-n', 'kube-system', 'rollout', 'status', 'deployment/traefik', '--timeout=600s'] }}"
+  changed_when: false
+
+- name: Copy Coraza middleware configuration
+  ansible.builtin.copy:
+    src: "{{ rag_source_dir | default(playbook_dir ~ '/..') }}/waf/traefik-waf-middleware.yaml"
+    dest: "{{ rag_remote_dir }}/traefik-waf-middleware.yaml"
+    mode: '0644'
+
+- name: Render Traefik route to the Istio gateway
+  ansible.builtin.template:
+    src: streaming-rag-ingress.yaml.j2
+    dest: "{{ rag_remote_dir }}/streaming-rag-ingress.yaml"
+    mode: '0644'
+
+- name: Apply the edge WAF middleware and route
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['apply', '-f', rag_remote_dir ~ '/traefik-waf-middleware.yaml', '-f', rag_remote_dir ~ '/streaming-rag-ingress.yaml'] }}"
+  register: traefik_waf_apply
+  changed_when: "'created' in traefik_waf_apply.stdout or 'configured' in traefik_waf_apply.stdout"

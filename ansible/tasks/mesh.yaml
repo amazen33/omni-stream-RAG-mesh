@@ -1,0 +1,74 @@
+---
+# Provider-neutral mesh bootstrap. The controller needs a working kubeconfig,
+# Helm, and permissions to install CRDs/namespaces. It does not assume K3s,
+# EKS, AKS, a particular CNI, or a cloud identity provider.
+- name: Validate SPIFFE and mesh deployment inputs
+  ansible.builtin.assert:
+    that:
+      - deployment_profile in ['onprem', 'aws', 'azure', 'generic']
+      - spire_trust_domain is match('^[a-z0-9][a-z0-9._-]*$')
+      - spire_trust_domain not in ['example.org', 'example.com', 'localhost']
+      - spire_cluster_name is match('^[a-z0-9][a-z0-9._-]*$')
+      - spire_jwt_issuer is match('^https://[a-z0-9][a-z0-9.-]*$')
+      - spire_ca_country | length > 0
+      - spire_ca_organization | length > 0
+      - storage_class | length > 0
+      - mesh_ingress_host is match('^[a-z0-9][a-z0-9.-]*$')
+      - kube_cli_argv | length > 0
+    fail_msg: Set a unique lowercase SPIFFE trust domain, cluster name, HTTPS JWT issuer, CA subject, storage class, ingress host, and Kubernetes client command for this target environment.
+
+- name: Install Istio and SPIRE releases in dependency order
+  ansible.builtin.include_tasks: operator.yaml
+  loop: "{{ mesh_operator_releases }}"
+  loop_control: {loop_var: operator}
+  when: operator.enabled | bool
+
+- name: Wait for Istio control plane
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['-n', istio_namespace, 'rollout', 'status', 'deployment/istiod', '--timeout=600s'] }}"
+  changed_when: false
+
+- name: Wait for Istio ingress gateway
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['-n', istio_ingress_namespace, 'rollout', 'status', 'deployment/istio-ingress', '--timeout=600s'] }}"
+  changed_when: false
+
+- name: Wait for SPIRE controller manager and server
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['-n', spire_namespace, 'wait', '--for=condition=Available', 'deployment', '--all', '--timeout=600s'] }}"
+  changed_when: false
+
+- name: Wait for SPIRE agent daemonset
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['-n', spire_namespace, 'rollout', 'status', 'daemonset/spire-agent', '--timeout=600s'] }}"
+  changed_when: false
+
+- name: Verify the SPIFFE CSI driver is registered
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['get', 'csidriver', 'csi.spiffe.io'] }}"
+  changed_when: false
+
+- name: Render mesh policy and identity registration for this cluster
+  ansible.builtin.template:
+    src: service-mesh.yaml.j2
+    dest: "{{ rag_remote_dir }}/service-mesh.yaml"
+    mode: '0644'
+
+- name: Apply gateway, SPIFFE identity registration, and strict workload policy
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['apply', '-f', rag_remote_dir ~ '/service-mesh.yaml'] }}"
+  register: mesh_policy_apply
+  changed_when: "'created' in mesh_policy_apply.stdout or 'configured' in mesh_policy_apply.stdout"
+
+- name: Verify rag-api SPIFFE registration was accepted
+  ansible.builtin.command:
+    argv: "{{ kube_cli_argv + ['get', 'clusterspiffeid', 'rag-api', '-o', 'json'] }}"
+  register: rag_spiffe_identity
+  changed_when: false
+
+- name: Assert registration uses the configured controller trust domain template
+  ansible.builtin.assert:
+    that:
+      - (rag_spiffe_identity.stdout | from_json).spec.spiffeIDTemplate is search('\\{\\{ \\.TrustDomain \\}\\}')
+      - (rag_spiffe_identity.stdout | from_json).spec.podSelector.matchLabels.app == 'rag-api'
+    fail_msg: rag-api ClusterSPIFFEID is missing its controller-resolved trust-domain template or workload selector.

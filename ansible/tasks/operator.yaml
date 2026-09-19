@@ -1,0 +1,9 @@
+---
+- name: Write operator values
+  ansible.builtin.copy:
+    dest: "{{ rag_remote_dir }}/{{ operator.name }}-values.yaml"
+    content: "{{ operator['values'] | to_nice_yaml }}"
+    mode: '0600'
+- name: Install operator with readiness wait
+  ansible.builtin.command:
+    argv: "{{ ['helm', 'upgrade', '--install', operator.name, operator.chart] + (['--version', operator.version] if operator.version | default('') | length > 0 else []) + ['--namespace', operator.namespace, '--create-namespace', '--values', rag_remote_dir ~ '/' ~ operator.name ~ '-values.yaml', '--wait', '--timeout', '10m'] }}"
