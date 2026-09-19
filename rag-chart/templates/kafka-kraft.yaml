@@ -1,0 +1,9 @@
+{{- if .Values.integrations.kafka }}
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata: {name: kafka, namespace: {{ .Release.Namespace }}}
+spec:
+  kafka: {version: 3.9.0, replicas: 3, listeners: [{name: internal, port: 9092, type: internal, tls: false}], storage: {type: persistent-claim, size: 100Gi, deleteClaim: false}, config: {auto.create.topics.enable: false, min.insync.replicas: 2}}
+  entityOperator: {topicOperator: {}, userOperator: {}}
+
+{{- end }}

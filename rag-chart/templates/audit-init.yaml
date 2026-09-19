@@ -1,0 +1,57 @@
+{{- if .Values.auditInit.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rag-audit-init
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 180
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: init
+          image: "{{ .Values.ragApi.image.repository }}:{{ .Values.ragApi.image.tag }}"
+          imagePullPolicy: {{ .Values.ragApi.image.pullPolicy }}
+          envFrom: [{secretRef: {name: rag-secrets}}]
+          env:
+            - {name: S3_ENDPOINT_URL, value: "http://minio:9000"}
+            - {name: AWS_DEFAULT_REGION, value: us-east-1}
+          command: [python, -c]
+          args:
+            - |
+              import boto3, os
+              import json, urllib.request
+              from botocore.exceptions import ClientError
+              s3 = boto3.client('s3', endpoint_url=os.environ['S3_ENDPOINT_URL'])
+              try:
+                  s3.create_bucket(Bucket='rag-audit', ObjectLockEnabledForBucket=True)
+              except ClientError as exc:
+                  if exc.response['Error']['Code'] not in ('BucketAlreadyOwnedByYou', 'BucketAlreadyExists'):
+                      raise
+              assert s3.get_object_lock_configuration(Bucket='rag-audit')['ObjectLockConfiguration']['ObjectLockEnabled'] == 'Enabled'
+              config = {
+                  'connector.class': 'io.debezium.connector.postgresql.PostgresConnector',
+                  'database.hostname': 'postgres', 'database.port': '5432',
+                  'database.user': 'rag', 'database.password': os.environ['POSTGRES_PASSWORD'],
+                  'database.dbname': 'transactions', 'topic.prefix': 'transactions',
+                  'plugin.name': 'pgoutput', 'slot.name': 'rag_transactions',
+                  'publication.name': 'rag_transactions',
+                  'publication.autocreate.mode': 'filtered',
+                  'table.include.list': 'public.transactions', 'snapshot.mode': 'initial',
+              }
+              request = urllib.request.Request(
+                  'http://debezium:8083/connectors/transactions-cdc/config',
+                  data=json.dumps(config).encode(), method='PUT',
+                  headers={'Content-Type': 'application/json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  assert response.status in (200, 201)
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+{{- end }}

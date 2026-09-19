@@ -1,0 +1,29 @@
+{{- if .Values.integrations.debezium }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: debezium-connector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: debezium-connector
+    app.kubernetes.io/component: cdc
+    app.kubernetes.io/part-of: streaming-rag-mesh
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  connector.json: |
+    {
+      "name": "transactions-cdc",
+      "config": {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "database.hostname": "{{ .Values.db.host }}",
+        "database.user": "{{ .Values.db.user }}",
+        "database.password": "{{ .Values.db.password }}",
+        "database.dbname": "transactions",
+        "topic.prefix": "transactions",
+        "plugin.name": "pgoutput",
+        "publication.autocreate.mode": "filtered",
+        "table.include.list": "public.transactions",
+        "snapshot.mode": "initial"
+      }
+    }
+{{- end }}

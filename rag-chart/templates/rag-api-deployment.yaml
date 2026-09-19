@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rag-api
+    app.kubernetes.io/name: rag-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: streaming-rag-mesh
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.ragApi.replicaCount | default 2 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  template:
+    metadata:
+      labels:
+        app: rag-api
+        app.kubernetes.io/name: rag-api
+        app.kubernetes.io/component: api
+      {{- if and .Values.mesh.enabled .Values.mesh.istio.injectSidecar }}
+      annotations:
+        sidecar.istio.io/inject: "true"
+      {{- end }}
+    spec:
+      serviceAccountName: rag-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: "{{ .Values.ragApi.image.repository }}:{{ required "Set ragApi.image.tag to a published application image SHA" .Values.ragApi.image.tag }}"
+          imagePullPolicy: {{ .Values.ragApi.image.pullPolicy | default "IfNotPresent" }}
+          command: ["python", "-m", "uvicorn"]
+          args: ["app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: rag-config
+                optional: true
+            - secretRef:
+                name: rag-secrets
+                optional: true
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: {{ .Values.ragApi.resources.requests.cpu }}
+              memory: {{ .Values.ragApi.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.ragApi.resources.limits.cpu }}
+              memory: {{ .Values.ragApi.resources.limits.memory }}
+          startupProbe:
+            httpGet:
+              path: /health/startup
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if and .Values.mesh.enabled .Values.mesh.spiffe.enabled }}
+            - name: spiffe-workload-api
+              mountPath: {{ .Values.mesh.spiffe.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if and .Values.mesh.enabled .Values.mesh.spiffe.enabled }}
+        - name: spiffe-workload-api
+          csi:
+            driver: {{ .Values.mesh.spiffe.csiDriver | quote }}
+            readOnly: true
+        {{- end }}

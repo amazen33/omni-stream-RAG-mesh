@@ -1,0 +1,52 @@
+{{- if .Values.integrations.certificates }}
+# cert-manager integration hook for RAG mesh mTLS
+# Apply after cert-manager is running and after the `rag` namespace exists:
+#   kubectl create namespace rag --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f mlts-cert-manager.yaml
+#
+# The `rag-ca` Issuer creates a self-signed CA scoped to the `rag` namespace.
+# The `rag-api-tls` Certificate is issued by that CA and stored in the
+# `rag-api-tls` Secret, which workloads mount for TLS termination.
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: rag-ca
+  namespace: {{ .Release.Namespace }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rag-api-tls
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: rag-api-tls
+  duration: 2160h      # 90 days
+  renewBefore: 360h    # renew 15 days before expiry
+  commonName: rag-api.rag.svc.cluster.local
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
+  issuerRef:
+    name: rag-ca
+    kind: Issuer
+    group: cert-manager.io
+  dnsNames:
+    - rag-api.rag.svc.cluster.local
+    - rag-api
+    - rag-api.rag
+    - rag-api.rag.svc
+  secretTemplate:
+    labels:
+      app.kubernetes.io/name: rag-api
+      app.kubernetes.io/component: tls
+      app.kubernetes.io/part-of: streaming-rag-mesh
+{{- end }}

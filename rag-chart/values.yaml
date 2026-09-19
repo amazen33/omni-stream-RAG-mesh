@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# rag-chart values.yaml
+# Every key referenced by templates/ must be defined here.
+# ---------------------------------------------------------------------------
+
+ragApi:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/amazen33/omni-stream-rag-mesh
+    # Supply the SHA of a successfully scanned, published application image.
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Keep mesh integration opt-in for plain local Helm use. Ansible and cloud/on-
+# prem overlays enable it only after Istio and SPIRE are installed and healthy.
+mesh:
+  enabled: false
+  istio:
+    injectSidecar: false
+  spiffe:
+    enabled: false
+    csiDriver: csi.spiffe.io
+    mountPath: /run/spiffe/workload
+
+diagnosticVerifier:
+  suspend: true
+  serviceAccountName: default
+
+db:
+  host: postgres.rag.svc.cluster.local
+  user: rag
+  password: changeme
+
+spark:
+  suspend: true
+
+config: {}
+auditInit:
+  enabled: false
+# Legacy integration examples are not rendered without explicit opt-in.
+integrations:
+  kafka: false
+  mirrorMaker: false
+  externalSecrets: false
+  certificates: false
+  debezium: false
+  spark: false

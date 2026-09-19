@@ -1,0 +1,27 @@
+{{- if .Values.integrations.mirrorMaker }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaMirrorMaker2
+metadata:
+  name: payments-replication
+  namespace: {{ .Release.Namespace }}
+spec:
+  version: 3.9.0
+  replicas: 2
+  target:
+    alias: dr
+    bootstrapServers: kafka-dr-bootstrap.rag.svc:9093
+    groupId: payments-replication-group
+    configStorageTopic: payments-replication-configs
+    offsetStorageTopic: payments-replication-offsets
+    statusStorageTopic: payments-replication-status
+    tls: {trustedCertificates: []}
+  mirrors:
+    - source:
+        alias: primary
+        bootstrapServers: kafka-primary-bootstrap.rag.svc:9093
+        tls: {trustedCertificates: []}
+      topicsPattern: "payments\\..*"
+      groupsPattern: "payments-.*"
+      sourceConnector: {config: {replication.factor: 3}}
+      checkpointConnector: {config: {replication.factor: 3}}
+{{- end }}
