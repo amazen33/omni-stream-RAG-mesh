@@ -1,0 +1,37 @@
+# Prerequisites: Velero plus its AWS/S3 plugin and a CSI or cloud snapshot
+# provider. The credentials Secret and bucket are supplied outside this repo.
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: rag-minio
+  namespace: velero
+  annotations:
+    backup.velero.io/server-side-encryption: AES256
+spec:
+  provider: aws
+  objectStorage:
+    bucket: rag-velero-backups
+    prefix: rag
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "true"
+    s3Url: http://minio.rag.svc:9000
+  credential:
+    name: velero-minio-credentials
+    key: cloud
+  default: true
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: rag-daily-stateful-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"
+  template:
+    storageLocation: rag-minio
+    includedNamespaces: [rag]
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: true
+    ttl: 720h0m0s
+    includeClusterResources: true
