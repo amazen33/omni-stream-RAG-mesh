@@ -1,0 +1,16 @@
+# Dependency-free demonstration profile; all data is ephemeral.
+services:
+  rag-api:
+    build: .
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      ENABLE_AUDIT_STORE: "false"
+      ENABLE_KAFKA: "false"
+      ENABLE_VECTOR_STORE: "false"
+      ENABLE_SEARCH_STORE: "false"
+      ENABLE_OLLAMA_INFERENCE: "false"
+      PII_TOKEN_SALT: "local-demo-only"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
