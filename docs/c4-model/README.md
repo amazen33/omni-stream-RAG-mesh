@@ -23,3 +23,12 @@ The diagrams are descriptive views of repository components, not additional
 runtime dependencies. Optional adapters remain controlled by environment flags
 such as `ENABLE_KAFKA`, `ENABLE_VECTOR_STORE`, `ENABLE_SEARCH_STORE`,
 `ENABLE_METADATA_INDEX`, and `ENABLE_OLLAMA_INFERENCE`.
+
+The resilience revision adds correlation/causation and W3C trace context to
+every view. EventStoreDB, TimescaleDB, the OpenTelemetry Collector, Istio,
+SPIRE, and Velero are deployment components. The provider-neutral mesh play
+installs the Istio and hardened SPIRE controllers (including the CSI driver)
+for a prepared Kubernetes target; the target environment still supplies the
+approved trust domain, CA subject, JWT issuer, storage, WAF/DNS, credentials,
+and recovery evidence. The source root for these C4 views is
+`D:\project\Rag-Mesh\omni-stream-RAG-mesh`.
