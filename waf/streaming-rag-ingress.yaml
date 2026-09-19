@@ -1,0 +1,21 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rag-api
+  namespace: rag
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`rag.internal.mesh`)
+      kind: Rule
+      middlewares:
+        - name: ragg-coraza-waf
+      services:
+        # The WAF terminates external traffic, then sends it to the Istio
+        # gateway. Envoy establishes mTLS for the final hop to rag-api.
+        - name: istio-ingress
+          namespace: istio-ingress
+          port: 80
+  tls:
+    certResolver: default

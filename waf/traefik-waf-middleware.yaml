@@ -1,0 +1,14 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ragg-coraza-waf
+  namespace: rag
+spec:
+  plugin:
+    coraza:
+      crsEnabled: true
+      directives:
+        - SecRuleEngine On
+        - SecDefaultAction "phase:1,log,auditlog,deny,status:403"
+        - SecDefaultAction "phase:2,log,auditlog,deny,status:403"
+        - SecRule REQUEST_URI "@streq /admin-secret" "id:101,phase:1,log,deny,status:403,msg:'Unauthorized Admin Access Attempt'"

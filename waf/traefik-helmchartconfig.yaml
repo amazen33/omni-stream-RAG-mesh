@@ -1,0 +1,13 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  values: |
+    additionalArguments:
+      # Required only because this IngressRoute intentionally forwards to the
+      # dedicated Istio ingress namespace after Coraza inspection.
+      - "--providers.kubernetescrd.allowCrossNamespace=true"
+      - "--experimental.plugins.coraza-http-wasm-traefik.moduleName=github.com/jcchavezs/coraza-http-wasm-traefik"
+      - "--experimental.plugins.coraza-http-wasm-traefik.version=v0.2.1"
