@@ -1,0 +1,5 @@
+---
+# Primary on-prem target: upstream Kubernetes installed with kubeadm/containerd.
+# EKS, AKS, and prepared Kubernetes targets use ansible/configure-mesh.yaml.
+# The prior K3s application-lab workflow remains at ansible/provision.yaml.
+- import_playbook: ansible/bootstrap-kubernetes.yaml
