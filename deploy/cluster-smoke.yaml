@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rag-bootstrap-check
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: rag-bootstrap-check
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: bootstrap-web}
+  template:
+    metadata:
+      labels: {app: bootstrap-web}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels: {app: bootstrap-web}
+      containers:
+        - name: web
+          image: busybox:1.36.1
+          command: [sh, -c, 'mkdir -p /tmp/www; echo cluster-ok > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www']
+          ports: [{containerPort: 8080}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: rag-bootstrap-check
+spec:
+  selector: {app: bootstrap-web}
+  ports: [{port: 8080, targetPort: 8080}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: smoke-data
+  namespace: rag-bootstrap-check
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 16Mi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dns-service-storage
+  namespace: rag-bootstrap-check
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: check
+          image: busybox:1.36.1
+          command: [sh, -ec]
+          args:
+            - |
+              nslookup kubernetes.default.svc.cluster.local
+              for i in 1 2 3 4 5; do
+                wget -qO- http://web:8080 | grep cluster-ok && break
+                sleep 5
+              done
+              wget -qO- http://web:8080 | grep cluster-ok
+              echo storage-ok > /data/check.txt
+              grep storage-ok /data/check.txt
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: smoke-data}
