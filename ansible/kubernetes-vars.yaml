@@ -1,0 +1,13 @@
+---
+# Primary on-prem target: upstream Kubernetes installed with kubeadm and
+# containerd. Managed EKS/AKS clusters do not run this playbook.
+kubernetes_minor: v1.35
+kubernetes_apt_repository: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/"
+kubeconfig: /etc/kubernetes/admin.conf
+kube_cli_argv: [kubectl]
+kubernetes_control_plane_host: "{{ hostvars[groups['master'][0]].ansible_host }}"
+kubernetes_control_plane_endpoint: "{{ kubernetes_control_plane_host }}:6443"
+kubernetes_pod_subnet: 10.244.0.0/16
+kubernetes_service_subnet: 10.96.0.0/12
+calico_version: v3.32.2
+helm_version: v3.19.0
