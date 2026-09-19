@@ -12,8 +12,9 @@ already provisioned. Optional integrations are called out explicitly.
 - Produce explainable, immutable evidence for financial compliance reviews.
 - Redact/tokenize sensitive data before vector embedding or model inference.
 - Correlate transaction and IoT telemetry streams with low operational latency.
-- Preserve deployment portability across local Docker, Kubernetes/K3s, AWS, and
-  Azure using environment-driven adapters and S3-compatible storage.
+- Preserve deployment portability across local Docker, kubeadm Kubernetes,
+  managed AWS/Azure Kubernetes, and the legacy K3s edge/lab profile using
+  environment-driven adapters and S3-compatible storage.
 - Provide auditable delivery gates and repeatable infrastructure provisioning.
 
 ### Stakeholders
@@ -219,7 +220,8 @@ The technology baseline is container-first and platform-agnostic:
 
 - Docker Compose provides the local reference topology.
 - Kubernetes manifests target a `rag` namespace; they are compatible with
-  K3s when its storage, ingress, and policy choices are supplied.
+  kubeadm Kubernetes when its CSI storage, ingress, and policy choices are
+  supplied; K3s is retained only for constrained lab/edge use.
 - Kafka is configured in KRaft mode; production deployments should use
   multiple brokers and replication.
 - Spark is the implemented streaming engine; `streaming/flink-job.yaml` is an
@@ -233,7 +235,7 @@ The technology baseline is container-first and platform-agnostic:
   the target enterprise.
 
 ```archimate
-System Software "K3s / Kubernetes" as k8s
+System Software "kubeadm Kubernetes / managed Kubernetes" as k8s
 System Software "Docker runtime" as docker
 System Software "Kafka KRaft" as kafka
 System Software "Spark Structured Streaming" as spark
@@ -253,7 +255,7 @@ k8s --> trust
 ```mermaid
 flowchart LR
     CI[Jenkins + Trivy gates] --> Registry[Container registry]
-    Terraform[Terraform AWS/Azure] --> Runtime[K3s/Kubernetes]
+    Terraform[Terraform AWS/Azure] --> Runtime[kubeadm/managed Kubernetes]
     Ansible[Ansible host provisioning] --> Runtime
     Argo[ArgoCD / Rollouts] --> Runtime
     Runtime --> Kafka[Kafka KRaft]
@@ -270,7 +272,7 @@ cloud "Container registry" as registry
 component "Terraform AWS/Azure" as terraform
 component "Ansible" as ansible
 component "ArgoCD / Rollouts" as argo
-node "K3s / Kubernetes" as k8s
+node "kubeadm / managed Kubernetes" as k8s
 node "Kafka KRaft" as kafka
 node "Spark Structured Streaming" as spark
 database "MinIO / ChromaDB / OpenSearch" as data
@@ -297,7 +299,7 @@ trust --> k8s
 | 0. Baseline | Local Compose proof of flow | Tests pass; secrets externalized |
 | 1. Govern | Object lock, PII policy, IAM, TLS | Retention and access evidence reviewed |
 | 2. Stream | Kafka replication and Spark checkpoints | Replay and lag drills pass |
-| 3. Scale | K3s/Kubernetes replicas and managed storage | Load, failover, and restore objectives met |
+| 3. Scale | kubeadm/managed Kubernetes replicas and managed storage | Load, failover, and restore objectives met |
 | 4. Integrate | Enterprise brokers, IAM, SIEM, CMDB, data catalog | Contract and ownership sign-off |
 | 5. Optimize | Model evaluation, cost controls, canary releases | Quality and SLO dashboards accepted |
 
@@ -332,7 +334,7 @@ integrate --> target
 flowchart LR
     Baseline[0 Baseline: Compose] --> Govern[1 Govern: PII, IAM, TLS]
     Govern --> Stream[2 Stream: replicated Kafka + checkpoints]
-    Stream --> Scale[3 Scale: K3s/Kubernetes + managed storage]
+    Stream --> Scale[3 Scale: kubeadm/managed Kubernetes + managed storage]
     Scale --> Integrate[4 Integrate: enterprise IAM, SIEM, catalog]
     Integrate --> Optimize[5 Optimize: evaluation and canaries]
 ```
@@ -416,3 +418,46 @@ risk --> audit
 Changes to event topics, PII patterns, retention, or adapter contracts require
 architecture review and a documentation update. CI must continue to validate
 tests, image security, and IaC security before GitOps synchronization.
+
+## Phase F–H — Resilience implementation, migration, and governance
+
+### Implemented target-state controls
+
+The application now carries an immutable correlation/causation contract across
+HTTP, JSON payloads, and Kafka headers. Each request has a W3C `traceparent`;
+the core propagates that context without making an OpenTelemetry library a
+runtime prerequisite. The API is a CQRS command boundary: it writes
+object-locked audit facts and publishes `StateTransitionLogged` plus
+compensating events, while consumers may construct their own read models from
+Kafka, EventStoreDB, and TimescaleDB.
+
+| Architecture building block | Repository implementation | Operational prerequisite |
+| --- | --- | --- |
+| Boundary resilience | Named bulkhead, token-bucket, timeout, and Prometheus boundary metrics | Calibrated limits/SLO alerts per dependency |
+| Immutable audit | S3/MinIO Object Lock COMPLIANCE writes, seven-year retention, transition/compensation prefixes | Object-lock bucket created before first write and retention reviewed |
+| Event/read stores | EventStoreDB and TimescaleDB StatefulSets; MirrorMaker 2 manifest | TLS, credentials, HA sizing, projection ownership, restore drill |
+| LGTM | Prometheus scrape targets plus Tempo/Loki/Grafana and OTel Collector definitions | Dashboard/alert ownership and configured Tempo endpoint |
+| Zero trust | Automated SPIRE hardened stack/CSI/Controller Manager, sidecar-mode STRICT Istio PeerAuthentication, selected `rag-api` SPIFFE ID, Traefik/Coraza gateway route, and corrected DNS/ingress policy | Approved per-environment trust domain/CA subject/JWT issuer, storage class, cloud WAF route, and live mTLS/SVID evidence |
+| DR | Velero BackupStorageLocation and daily PVC snapshot schedule | S3 plugin/credentials, snapshot class, quarterly isolated restore evidence |
+
+### Migration controls
+
+1. Apply the application and collector changes with audit storage disabled only
+   in development; production cutover requires a verified object-lock bucket.
+2. Deploy EventStoreDB/TimescaleDB as isolated stateful services and introduce
+   consumers/projectors under a reviewed ownership model. Do not represent the
+   empty service as an active source of truth.
+3. For prepared K3s, EKS, AKS, or generic Kubernetes, run the provider-neutral
+   `ansible/configure-mesh.yaml` (the K3s lab play remains node-specific).
+   It installs SPIRE CRDs, the hardened server/agent/Controller Manager/CSI
+   stack, Istio, and the gateway before rendering the selected
+   `ClusterSPIFFEID` and STRICT policy. Supply the target trust domain, cluster
+   name, CA subject, JWT issuer, StorageClass, and edge host, then verify the
+   SVID CSI volume, sidecar, labels, service account, and plaintext rejection.
+4. Create a Velero backup, restore into an isolated namespace, and reconcile
+   MirrorMaker 2 before declaring the multi-cluster recovery path operational.
+
+The lifecycle chaos suite (`tests/chaos/test_lifecycle_downstream_failure.py`)
+is the Phase G conformance gate. GitHub Actions and Jenkins run the full chaos
+directory so a regression in trace propagation, metrics, or compensation
+prevents promotion.
