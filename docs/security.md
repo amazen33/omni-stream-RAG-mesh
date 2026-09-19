@@ -50,6 +50,11 @@ Terraform state in Git.
 ## Runtime hardening
 
 Use private networks for Kafka, MinIO, OpenSearch/Elasticsearch, Ollama, and
-ChromaDB; terminate TLS at the ingress or service mesh; use external secrets
-and workload identity; restrict egress; scan images and IaC in Jenkins with
-Trivy; and apply least privilege to audit readers and writers.
+ChromaDB; terminate TLS at the edge gateway and enforce sidecar mTLS for the
+application; use external secrets and SPIFFE workload identity; restrict egress;
+scan images and IaC in Jenkins with Trivy; and apply least privilege to audit
+readers and writers. The SPIFFE CSI driver mounts a workload SVID only after
+the SPIRE Controller Manager reconciles the selected `rag-api` identity. Istio
+sidecars enforce the mTLS policy; SPIRE is not a substitute for istiod. The
+on-prem and cloud routing/attestation prerequisites are in
+[platform profiles](platform-profiles.md).
