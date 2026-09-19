@@ -96,6 +96,38 @@ api --> client : response and audit key
 @enduml
 ```
 
+## Downstream-failure sequence
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant MW as correlation middleware
+    participant API as route
+    participant Policy as ResiliencePolicy
+    participant Audit as AuditSink
+    participant Kafka as EventPublisher
+
+    Client->>MW: request + optional correlation/trace headers
+    MW->>API: request_id, correlation_id, traceparent
+    API->>Audit: INITIALIZED → PROCESSING
+    API->>Policy: call downstream boundary
+    alt succeeds
+        Policy-->>API: result + duration metric
+        API->>Audit: PROCESSING → COMPLETED
+    else rejects, times out, or fails
+        Policy-->>API: safe failure signal + failure metric
+        API->>Audit: PROCESSING → COMPENSATED + record
+        API->>Kafka: compensating event + immutable headers
+    end
+    API-->>Client: safe response + correlation/trace headers
+```
+
+The concrete implementation is `app/main.py` (middleware/routes and audit
+coordination), `domain/events.py` (event contract),
+`contexts/ai/resilience.py` (boundary policy), and
+`contexts/governance/publisher.py` (Kafka headers). Payment risk scoring uses
+the same path and returns `review` when its boundary fails.
+
 ```archimate
 Business Actor "API Client" as client
 Application Function "PII redaction" as redact
