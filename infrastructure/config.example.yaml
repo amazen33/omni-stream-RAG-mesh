@@ -2,12 +2,35 @@
 image:
   repository: ghcr.io/OWNER/REPOSITORY
   tag: immutable-git-sha
+platform:
+  # onprem uses kubeadm/containerd and kubectl; aws, azure, and generic use a
+  # managed/prepared Kubernetes controller. K3s is legacy lab/edge only.
+  profile: onprem
+  kube_context: replace-with-target-context
 runtime:
   namespace: rag
   replicas: 2
 storage:
+  class: replace-with-target-storage-class
   s3_endpoint_url: https://object-store.example.invalid
   audit_bucket: rag-audit
+mesh:
+  enabled: true
+  trust_domain: corp.example
+  cluster_name: prod-cluster-01
+  spire_management_namespace: spire-mgmt
+  istio_namespace: istio-system
+  istio_ingress_namespace: istio-ingress
+  # SPIRE issues the workload SVID mounted by the CSI driver. Istio sidecars
+  # enforce workload mTLS; do not treat SPIRE as a replacement for istiod.
+  spiffe_csi_driver: csi.spiffe.io
+  workload_svid_mount: /run/spiffe/workload
+ingress:
+  host: rag.example.invalid
+  # On-prem/cloud: organization or provider WAF -> private Istio gateway load
+  # balancer. Legacy K3s labs use Traefik/Coraza. Keep the app service private.
+  edge_waf: organization-waf
+  istio_gateway_service: istio-ingress.istio-ingress.svc.cluster.local
 secrets:
   # References, not values. Resolve through External Secrets or CI.
   provider: external-secrets
