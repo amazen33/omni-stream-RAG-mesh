@@ -41,6 +41,45 @@ spark --> minio
 @enduml
 ```
 
+## Resilience, observability, and state containers
+
+```mermaid
+flowchart TB
+    API[FastAPI domain service] --> Kafka[Kafka + MirrorMaker 2]
+    API --> Audit[MinIO/S3 Object-Lock]
+    API --> OTel[OpenTelemetry Collector]
+    OTel --> Tempo[Tempo traces]
+    OTel --> Prom[Prometheus metrics]
+    TS[TimescaleDB analytics] --> Grafana[Grafana]
+    ES[EventStoreDB CQRS streams] --> Projector[Read-model projector]
+    Velero[Velero] --> PVCs[MinIO/Kafka/TimescaleDB/OpenSearch PVCs]
+```
+
+`EventStoreDB` and `TimescaleDB` are delivered as optional stateful containers
+in Compose and Kubernetes. A production projector is intentionally not
+hard-wired into the Python API: its replay and schema ownership must be
+approved by the deployment team. The collector transports OTLP telemetry; the
+API's dependency-free Prometheus endpoint remains directly scrapeable.
+
+## Workload identity and edge containers
+
+```mermaid
+flowchart LR
+    WAF[On-prem Coraza or cloud WAF] --> Gateway[Istio ingress gateway]
+    Gateway -->|STRICT sidecar mTLS| API[rag-api]
+    SPIRE[SPIRE Server / Controller Manager] --> Agent[SPIRE Agent]
+    Agent --> CSI[SPIFFE CSI driver]
+    CSI -->|X.509 SVID mount| API
+    Istiod[istiod] -->|xDS| API
+```
+
+`ansible/configure-mesh.yaml` creates this topology on a prepared Kubernetes
+target. Its `ClusterSPIFFEID` selects only `rag-api` by namespace and stable
+labels, and its CSI volume is part of the Helm deployment when the mesh profile
+is enabled. The WAF is platform-specific but has a common invariant: it cannot
+bypass the Istio gateway to reach the application service directly. SPIRE SVID
+issuance and Istio mTLS are distinct controls.
+
 ```archimate
 Business Actor "Financial Analyst / IoT Operator" as user
 Application Component "FastAPI Domain Service" as api
