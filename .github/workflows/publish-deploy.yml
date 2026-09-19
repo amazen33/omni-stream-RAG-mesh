@@ -15,7 +15,10 @@ permissions:
   packages: write
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
   publish:
+    needs: validate
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
