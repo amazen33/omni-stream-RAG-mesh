@@ -6,3 +6,8 @@ terraform.tfstate*
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+test-results/
+.tools/
+.deployment/
+ansible/lab-secrets.yaml
