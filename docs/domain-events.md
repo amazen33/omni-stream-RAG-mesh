@@ -46,9 +46,22 @@ variable is the integration contract.
 | `TelemetryIngested` | `telemetry.ingested` | `IngestionService` | request ID, source, chunk count, PII counts |
 | `TransactionProcessed` | `transaction.processed` | Domain/integration producers | request and transaction IDs, status, metadata |
 | `AuditRecordLogged` | `audit.record.logged` | API after audit write | request ID, object key, record type |
+| `StateTransitionLogged` | `state.transition.logged` | API lifecycle coordinator | from/to state and safe transition reason |
+| `IngestionCompensated` | `ingestion.compensated` | Ingestion failure handler | source, request ID, compensation reason |
+| `TransactionCompensated` | `transaction.compensated` | Retrieval/audit failure handler | transaction/request ID, dependency-safe error class |
+| `PaymentCompensated` | `payments.compensated.v1` | Risk scoring failure handler | fail-closed `review` decision and reason |
 
 `DomainEvent.to_dict()` adds `event_type` and `topic`, while `to_json()` emits
-stable sorted JSON. Kafka publication is disabled unless `ENABLE_KAFKA=true`.
+stable sorted JSON. Every payload includes generated immutable `event_id`,
+`correlation_id`, and `causation_id`, plus `traceparent` when HTTP context is
+available. `headers()`/`kafka_headers()` mirrors those values as UTF-8 Kafka
+headers with `event_type`. Kafka publication is disabled unless
+`ENABLE_KAFKA=true`.
+
+Root events receive a generated causation ID. A derived event uses the source
+event ID as `causation_id`; for example, `PaymentRiskScored` and
+`PaymentCompensated` are caused by `PaymentTransactionIngested`. This makes the
+causation chain inspectable independently of broker-specific metadata.
 
 ## Contract evolution
 
