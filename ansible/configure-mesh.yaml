@@ -1,0 +1,44 @@
+---
+# Use this from a cloud CI runner, bastion, or on-prem controller with kubectl
+# configured for the target cluster. It intentionally performs no SSH/node/K3s
+# bootstrap actions, so it works with managed Kubernetes and bare-metal alike.
+- name: Configure SPIFFE workload identity and Istio mesh on a Kubernetes target
+  hosts: mesh_controller:master
+  become: true
+  any_errors_fatal: true
+  gather_facts: true
+  vars_files: [lab-vars.yaml]
+  vars:
+    # All primary profiles use the standard Kubernetes client. The legacy K3s
+    # lab invokes the shared task directly with its embedded client instead.
+    kube_cli_argv: [kubectl]
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  tasks:
+    - name: Require a configured Helm client
+      ansible.builtin.command: helm version --short
+      changed_when: false
+    - name: Create mesh workspace
+      ansible.builtin.file:
+        path: "{{ rag_remote_dir }}"
+        state: directory
+        mode: '0755'
+    - name: Ensure the application namespace exists before identity registration
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['create', 'namespace', rag_namespace] }}"
+      register: rag_namespace_create
+      changed_when: "'created' in rag_namespace_create.stdout"
+      failed_when: rag_namespace_create.rc != 0 and 'AlreadyExists' not in rag_namespace_create.stderr
+    - name: Register mesh Helm repositories
+      ansible.builtin.command:
+        argv: [helm, repo, add, "{{ item.name }}", "{{ item.url }}", --force-update]
+      loop:
+        - {name: istio, url: "https://istio-release.storage.googleapis.com/charts"}
+        - {name: spiffe, url: "https://spiffe.github.io/helm-charts-hardened/"}
+      changed_when: false
+    - name: Refresh mesh Helm repositories
+      ansible.builtin.command: helm repo update
+      changed_when: false
+    - name: Configure Istio and SPIRE
+      ansible.builtin.include_tasks: tasks/mesh.yaml
+      when: mesh_enabled | bool
