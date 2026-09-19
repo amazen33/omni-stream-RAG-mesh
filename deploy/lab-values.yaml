@@ -1,0 +1,35 @@
+# Synthetic local lab traffic only. Dependencies are private ClusterIP services.
+ragApi:
+  replicaCount: 2
+  image:
+    repository: localhost/rag-mesh
+    tag: lab-v1
+    pullPolicy: Never
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+config:
+  ENABLE_KAFKA: "true"
+  ENABLE_AUDIT_STORE: "true"
+  ENABLE_VECTOR_STORE: "true"
+  ENABLE_SEARCH_STORE: "true"
+  ENABLE_OLLAMA_INFERENCE: "true"
+  KAFKA_BOOTSTRAP_SERVERS: kafka-kafka-bootstrap:9092
+  S3_ENDPOINT_URL: http://minio:9000
+  AWS_REGION: us-east-1
+  AUDIT_BUCKET: rag-audit
+  CHROMA_HOST: chromadb
+  CHROMA_PORT: "8000"
+  CHROMA_URL: http://chromadb:8000
+  SEARCH_URL: http://opensearch:9200
+  OLLAMA_BASE_URL: http://ollama:11434
+  OLLAMA_MODEL: llama3.2:3b
+  OLLAMA_EMBED_MODEL: nomic-embed-text
+  SCHEMA_REGISTRY_URL: http://schema-registry:8081
+  HEALTH_CHECK_TIMEOUT_SECONDS: "2"
+auditInit:
+  enabled: true
