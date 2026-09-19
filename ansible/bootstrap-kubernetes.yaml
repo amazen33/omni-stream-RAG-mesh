@@ -1,0 +1,289 @@
+---
+# Bootstrap a new, single-control-plane upstream Kubernetes cluster on Debian
+# or Ubuntu. It deliberately refuses hosts that already run K3s or kubeadm;
+# never use a bootstrap play to convert an existing cluster in place.
+- name: Prepare new kubeadm Kubernetes nodes
+  hosts: master:workers
+  become: true
+  any_errors_fatal: true
+  gather_facts: true
+  vars_files: [kubernetes-vars.yaml]
+  tasks:
+    - name: Require the supported on-prem topology and operating system
+      ansible.builtin.assert:
+        that:
+          - groups['master'] | length == 1
+          - groups['workers'] | length >= 2
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['memtotal_mb'] | int >= 3500
+          - ansible_facts['processor_vcpus'] | int >= 2
+        fail_msg: Require one new amd64 Debian/Ubuntu control plane and at least two workers with 2 CPUs and 3.5 GiB RAM each.
+
+    - name: Refuse to modify an existing Kubernetes distribution
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/local/bin/k3s
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/kubelet.conf
+      register: existing_kubernetes_files
+
+    - name: Confirm the nodes are safe to bootstrap
+      ansible.builtin.assert:
+        that: existing_kubernetes_files.results | map(attribute='stat.exists') | select | list | length == 0
+        fail_msg: Existing K3s or kubeadm state was found. Do not convert a live cluster; build new nodes or use the prepared-cluster mesh play.
+
+    - name: Install container runtime and package prerequisites
+      ansible.builtin.apt:
+        name: [apt-transport-https, ca-certificates, conntrack, containerd, curl, gpg, ipset, socat]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Configure required kernel modules
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/kubernetes.conf
+        content: "overlay\nbr_netfilter\n"
+        mode: '0644'
+
+    - name: Load required kernel modules
+      ansible.builtin.command:
+        argv: [modprobe, "{{ item }}"]
+      loop: [overlay, br_netfilter]
+      changed_when: false
+
+    - name: Configure Kubernetes network sysctls
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+
+    - name: Apply Kubernetes network sysctls
+      ansible.builtin.command: sysctl --system
+      changed_when: false
+
+    - name: Disable swap for kubelet
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb | int > 0
+
+    - name: Prevent swap from returning after reboot
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(?!#)(.*\s+swap\s+.*)$'
+        replace: '# \1'
+
+    - name: Generate the containerd configuration
+      ansible.builtin.command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Write containerd configuration
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: "{{ containerd_default_config.stdout }}\n"
+        mode: '0644'
+
+    - name: Enable systemd cgroups for kubelet and containerd
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      notify: Restart containerd
+
+    - name: Create Kubernetes package keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download the Kubernetes package signing key
+      ansible.builtin.get_url:
+        url: "{{ kubernetes_apt_repository }}Release.key"
+        dest: /tmp/kubernetes-release.key
+        mode: '0644'
+
+    - name: Install the Kubernetes package signing key
+      ansible.builtin.command:
+        argv: [gpg, --dearmor, --yes, --output, /etc/apt/keyrings/kubernetes-apt-keyring.gpg, /tmp/kubernetes-release.key]
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Register the Kubernetes minor-version package repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_apt_repository }} /"
+        filename: kubernetes
+        state: present
+
+    - name: Install the kubeadm toolchain
+      ansible.builtin.apt:
+        name: [kubelet, kubeadm, kubectl]
+        state: present
+        update_cache: true
+
+    - name: Hold the Kubernetes packages for reviewed upgrades
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubelet, kubeadm, kubectl]
+
+    - name: Enable kubelet before cluster initialization
+      ansible.builtin.service:
+        name: kubelet
+        state: started
+        enabled: true
+
+    - name: Download Helm for cluster add-ons
+      ansible.builtin.get_url:
+        url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+        checksum: "sha256:https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz.sha256sum"
+        dest: /tmp/helm.tar.gz
+        mode: '0644'
+
+    - name: Extract Helm
+      ansible.builtin.unarchive:
+        src: /tmp/helm.tar.gz
+        dest: /tmp
+        remote_src: true
+
+    - name: Install Helm executable
+      ansible.builtin.copy:
+        src: /tmp/linux-amd64/helm
+        dest: /usr/local/bin/helm
+        remote_src: true
+        mode: '0755'
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.service:
+        name: containerd
+        state: restarted
+
+- name: Initialize the upstream Kubernetes control plane and Calico CNI
+  hosts: master
+  become: true
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files: [kubernetes-vars.yaml]
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  tasks:
+    - name: Create the kubeadm configuration directory
+      ansible.builtin.file:
+        path: /etc/kubernetes
+        state: directory
+        mode: '0755'
+
+    - name: Render the kubeadm cluster configuration
+      ansible.builtin.template:
+        src: kubeadm-init.yaml.j2
+        dest: /etc/kubernetes/kubeadm-init.yaml
+        mode: '0600'
+
+    - name: Initialize the control plane without replacing existing state
+      ansible.builtin.command:
+        argv: [kubeadm, init, --config, /etc/kubernetes/kubeadm-init.yaml]
+      args:
+        creates: /etc/kubernetes/admin.conf
+      async: 1200
+      poll: 15
+
+    - name: Wait for Kubernetes API readiness
+      ansible.builtin.command: kubectl get --raw=/readyz
+      register: kubeadm_api_ready
+      until: kubeadm_api_ready.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: Verify the installed Kubernetes client version
+      ansible.builtin.command: kubectl version --client=true --output=yaml
+      changed_when: false
+
+    - name: Install Calico CRDs for Kubernetes NetworkPolicies
+      ansible.builtin.command:
+        argv: [kubectl, create, -f, "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/v1_crd_projectcalico_org.yaml"]
+      register: calico_crds
+      changed_when: "'created' in calico_crds.stdout"
+      failed_when: calico_crds.rc != 0 and 'AlreadyExists' not in calico_crds.stderr
+
+    - name: Install the pinned Calico operator
+      ansible.builtin.command:
+        argv: [kubectl, create, -f, "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"]
+      register: calico_operator
+      changed_when: "'created' in calico_operator.stdout"
+      failed_when: calico_operator.rc != 0 and 'AlreadyExists' not in calico_operator.stderr
+
+    - name: Render the Calico network configuration
+      ansible.builtin.template:
+        src: calico-installation.yaml.j2
+        dest: /etc/kubernetes/calico-installation.yaml
+        mode: '0600'
+
+    - name: Create the Calico network configuration
+      ansible.builtin.command:
+        argv: [kubectl, create, -f, /etc/kubernetes/calico-installation.yaml]
+      register: calico_installation
+      changed_when: "'created' in calico_installation.stdout"
+      failed_when: calico_installation.rc != 0 and 'AlreadyExists' not in calico_installation.stderr
+
+    - name: Wait for Calico networking
+      ansible.builtin.command:
+        argv: [kubectl, -n, calico-system, rollout, status, daemonset/calico-node, --timeout=600s]
+      changed_when: false
+
+    - name: Wait for CoreDNS after CNI installation
+      ansible.builtin.command:
+        argv: [kubectl, -n, kube-system, rollout, status, deployment/coredns, --timeout=600s]
+      changed_when: false
+
+    - name: Create a short-lived worker join command
+      ansible.builtin.command: kubeadm token create --ttl 30m --print-join-command
+      register: kubeadm_join_command
+      changed_when: false
+      no_log: true
+
+- name: Join workers to the upstream Kubernetes cluster
+  hosts: workers
+  become: true
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files: [kubernetes-vars.yaml]
+  tasks:
+    - name: Join each worker without replacing existing kubelet state
+      ansible.builtin.command: "{{ hostvars[groups['master'][0]].kubeadm_join_command.stdout }} --cri-socket unix:///run/containerd/containerd.sock"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+      no_log: true
+
+- name: Verify the upstream Kubernetes cluster
+  hosts: master
+  become: true
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files: [kubernetes-vars.yaml]
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  tasks:
+    - name: Wait for all inventory nodes to register
+      ansible.builtin.command: kubectl get nodes -o json
+      register: kubeadm_nodes
+      until: (kubeadm_nodes.stdout | from_json).items | length == (groups['master'] + groups['workers']) | length
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: Wait for all nodes to become Ready
+      ansible.builtin.command: kubectl wait nodes --all --for=condition=Ready --timeout=600s
+      changed_when: false
+
+    - name: Show the resulting Kubernetes nodes
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: ready_nodes
+      changed_when: false
+
+    - ansible.builtin.debug:
+        var: ready_nodes.stdout_lines
