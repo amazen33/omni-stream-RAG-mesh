@@ -1,0 +1,20 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rag-api
+  namespace: {{ rag_namespace }}
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`{{ mesh_ingress_host }}`)
+      kind: Rule
+      middlewares:
+        - name: ragg-coraza-waf
+      services:
+        # Coraza is the on-prem edge WAF. The Istio gateway owns the next hop
+        # and applies mTLS when routing to the workload.
+        - name: istio-ingress
+          namespace: {{ istio_ingress_namespace }}
+          port: 80
+  tls:
+    certResolver: default

@@ -1,0 +1,63 @@
+# Rendered by Ansible so each cluster has its own external host while SPIRE
+# resolves its configured trust domain at reconciliation time.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: rag-api-edge
+  namespace: rag
+spec:
+  selector: {istio: ingressgateway}
+  servers:
+    - port: {number: 80, name: http, protocol: HTTP}
+      hosts: ["{{ mesh_ingress_host }}"]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rag-api-edge
+  namespace: rag
+spec:
+  hosts: ["{{ mesh_ingress_host }}"]
+  gateways: [rag-api-edge]
+  http:
+    - route:
+        - destination:
+            host: rag-api.rag.svc.cluster.local
+            port: {number: 8000}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: rag-api-ingress
+  namespace: rag
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: rag-api, app: rag-api}
+  action: ALLOW
+  rules:
+    - from:
+        - source: {namespaces: ["{{ istio_ingress_namespace }}"]}
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: rag-api
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  spiffeIDTemplate: "spiffe://{% raw %}{{ .TrustDomain }}{% endraw %}/ns/{% raw %}{{ .PodMeta.Namespace }}{% endraw %}/sa/{% raw %}{{ .PodSpec.ServiceAccountName }}{% endraw %}"
+  namespaceSelector:
+    matchLabels: {kubernetes.io/metadata.name: rag}
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: rag-api, app: rag-api}
+  dnsNameTemplates:
+    - "rag-api.{% raw %}{{ .PodMeta.Namespace }}{% endraw %}.svc.{% raw %}{{ .ClusterDomain }}{% endraw %}"
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: rag-api-strict-mtls
+  namespace: rag
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: rag-api, app: rag-api}
+  mtls: {mode: STRICT}
