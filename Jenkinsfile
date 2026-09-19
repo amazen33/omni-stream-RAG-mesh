@@ -8,6 +8,9 @@ pipeline {
   environment { IMAGE = "ghcr.io/example/hybrid-rag:${BUILD_TAG}"; ACR_IMAGE = "${AZURE_ACR_LOGIN_SERVER}/hybrid-rag:${BUILD_TAG}" }
   stages {
     stage('Test') { steps { sh 'python -m pytest -q' } }
+    stage('Downstream Chaos & Resilience Gates') {
+      steps { sh 'python -m pytest -v tests/chaos' }
+    }
     stage('Build') { steps { sh 'docker build --pull -t "$IMAGE" .' } }
     stage('Trivy image gate') {
       steps { sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE"' }
