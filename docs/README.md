@@ -11,13 +11,13 @@ environment-driven integration.
 - [Domain model and event contracts](domain-events.md)
 - [Data flows](data-flows.md)
 - [Deployment and infrastructure topology](deployment-topology.md)
+- [On-prem and cloud platform profiles](platform-profiles.md)
 - [Security and trust boundaries](security.md)
 - [Delivery and operations](delivery-operations.md)
-- [Windows Python support](windows-python.md)
-- [Python compatibility policy](python-compatibility.md)
 - [Fintech payment streaming](fintech-payments.md)
 - [DDD naming compatibility](ddd-compatibility.md)
 - [TOGAF Architecture Definition](TOGAF_Architecture_Definition.md)
+- [Downstream-failure resilience and disaster recovery](disaster-recovery.md)
 
 ## C4 model
 
@@ -30,10 +30,13 @@ environment-driven integration.
 ## Source of truth
 
 The executable configuration is in the repository root and its subdirectories:
-`app/`, `contexts/`, `domain/`, `streaming/`, `docker-compose.yml`, `k8s/`,
+`app/`, `contexts/`, `domain/`, `streaming/`, `docker-compose.yaml`, `k8s/`,
 `terraform/`, `ansible/`, `deploy/`, and `Jenkinsfile`. These pages document
 those files; they do not imply that optional integrations are active in every
 deployment.
+
+The checked source root on this workstation is
+`D:\project\Rag-Mesh\omni-stream-RAG-mesh`.
 
 CI is defined in `.github/workflows/ci.yml` (tests, image build, and Trivy
 image/IaC gates). `.github/workflows/publish-deploy.yml` is an explicit,
