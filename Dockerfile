@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN addgroup --system app && adduser --system --ingroup app app
 COPY requirements.txt .
-RUN python -c "import sys; sys.exit('Supported Python is 3.12 or 3.13; image baseline must remain supported') if sys.version_info[:2] not in ((3, 12), (3, 13)) else None" \" \
+RUN python -c "import sys; sys.exit('Supported Python is 3.12 or 3.13; image baseline must remain supported') if sys.version_info[:2] not in ((3, 12), (3, 13)) else None" \
     && pip install --no-cache-dir --no-compile -r requirements.txt \
     && rm -rf /root/.cache
 COPY app ./app
