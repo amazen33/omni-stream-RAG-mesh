@@ -1,0 +1,151 @@
+# Stateful observability and CQRS extension points. Passwords are deliberately
+# sourced from rag-secrets; provision POSTGRES_PASSWORD before applying.
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  selector: {app: timescaledb}
+  ports: [{name: postgres, port: 5432, targetPort: postgres}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  serviceName: timescaledb
+  replicas: 1
+  selector: {matchLabels: {app: timescaledb}}
+  template:
+    metadata: {labels: {app: timescaledb, app.kubernetes.io/part-of: omni-stream-rag-mesh}}
+    spec:
+      containers:
+        - name: timescaledb
+          image: timescale/timescaledb:2.17.2-pg16
+          ports: [{name: postgres, containerPort: 5432}]
+          env:
+            - {name: POSTGRES_DB, value: rag_analytics}
+            - {name: POSTGRES_USER, value: rag}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: rag-secrets, key: POSTGRES_PASSWORD}}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 50Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventstoredb
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  selector: {app: eventstoredb}
+  ports:
+    - {name: client, port: 2113, targetPort: client}
+    - {name: gossip, port: 1113, targetPort: gossip}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: eventstoredb
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  serviceName: eventstoredb
+  replicas: 1
+  selector: {matchLabels: {app: eventstoredb}}
+  template:
+    metadata: {labels: {app: eventstoredb, app.kubernetes.io/part-of: omni-stream-rag-mesh}}
+    spec:
+      containers:
+        - name: eventstoredb
+          image: eventstore/eventstore:24.10.0-jammy
+          ports:
+            - {name: client, containerPort: 2113}
+            - {name: gossip, containerPort: 1113}
+          env:
+            - {name: EVENTSTORE_CLUSTER_SIZE, value: "1"}
+            - {name: EVENTSTORE_RUN_PROJECTIONS, value: All}
+            - {name: EVENTSTORE_START_STANDARD_PROJECTIONS, value: "true"}
+            # Single-node development flag. Production must configure TLS and
+            # credentials through the EventStoreDB security configuration.
+            - {name: EVENTSTORE_INSECURE, value: "true"}
+          volumeMounts: [{name: data, mountPath: /var/lib/eventstore}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 50Gi}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: rag
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {}
+          http: {}
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+      batch: {}
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls: {insecure: true}
+      prometheus:
+        endpoint: 0.0.0.0:8889
+    service:
+      pipelines:
+        traces: {receivers: [otlp], processors: [memory_limiter, batch], exporters: [otlp/tempo]}
+        metrics: {receivers: [otlp], processors: [memory_limiter, batch], exporters: [prometheus]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  selector: {app: otel-collector}
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: prometheus, port: 8889, targetPort: prometheus}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: rag
+  labels: {app.kubernetes.io/part-of: omni-stream-rag-mesh}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: otel-collector}}
+  template:
+    metadata: {labels: {app: otel-collector, app.kubernetes.io/part-of: omni-stream-rag-mesh}}
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.110.0
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: prometheus, containerPort: 8889}
+          volumeMounts: [{name: config, mountPath: /conf, readOnly: true}]
+      volumes:
+        - name: config
+          configMap: {name: otel-collector-config}
