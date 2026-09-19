@@ -1,0 +1,138 @@
+---
+# Run from the dedicated controller after its SSH key is authorized on the nodes.
+- name: Prepare new Kubernetes nodes
+  hosts: master:workers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Install basic prerequisites
+      ansible.builtin.apt:
+        name: [curl, ca-certificates]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Read node service state
+      ansible.builtin.service_facts:
+    - name: Protect any existing Kubernetes installation
+      ansible.builtin.assert:
+        that:
+          - "'kubelet.service' not in ansible_facts.services"
+        fail_msg: This bootstrap is for new K3s VMs, not an existing kubeadm cluster.
+    - name: Download K3s installer
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /var/tmp/install-k3s.sh
+        mode: '0700'
+
+- name: Bootstrap the control plane
+  hosts: master
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require an explicit K3s release
+      ansible.builtin.assert:
+        that:
+          - k3s_version is defined
+          - k3s_version is match('^v1\.35\.[0-9]+\+k3s[0-9]+$')
+        fail_msg: Set k3s_version to the selected stable 1.35 release.
+    - name: Install server without changing an existing server
+      ansible.builtin.command: /var/tmp/install-k3s.sh
+      args:
+        creates: /etc/systemd/system/k3s.service
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+        INSTALL_K3S_EXEC: "server --node-name rag-master --node-ip {{ ansible_host }} --tls-san {{ ansible_host }} --write-kubeconfig-mode 600"
+    - name: Ensure server is started
+      ansible.builtin.service: {name: k3s, state: started, enabled: true}
+    - name: Wait for control plane readiness
+      ansible.builtin.command: k3s kubectl get --raw=/readyz
+      register: server_ready
+      until: server_ready.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+    - name: Read the worker join token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_join_token
+      no_log: true
+    - name: Read administrator kubeconfig
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: k3s_config
+      no_log: true
+
+- name: Join the new workers
+  hosts: workers
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Install worker agent
+      ansible.builtin.command: /var/tmp/install-k3s.sh
+      args:
+        creates: /etc/systemd/system/k3s-agent.service
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+        K3S_URL: "https://{{ hostvars[groups['master'][0]].ansible_host }}:6443"
+        K3S_TOKEN: "{{ hostvars[groups['master'][0]].k3s_join_token.content | b64decode | trim }}"
+        INSTALL_K3S_EXEC: "agent --node-name {{ inventory_hostname }} --node-ip {{ ansible_host }}"
+      no_log: true
+    - name: Ensure agent is started
+      ansible.builtin.service: {name: k3s-agent, state: started, enabled: true}
+
+- name: Configure the dedicated Ansible controller
+  hosts: controller
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Create private kubeconfig directory
+      ansible.builtin.file: {path: /home/ubuntu/.kube, state: directory, mode: '0700'}
+    - name: Install kubeconfig with reachable API address
+      ansible.builtin.copy:
+        content: "{{ hostvars[groups['master'][0]].k3s_config.content | b64decode | replace('127.0.0.1', hostvars[groups['master'][0]].ansible_host) }}"
+        dest: /home/ubuntu/.kube/config
+        mode: '0600'
+      no_log: true
+    - name: Install matching checksum-verified kubectl on the controller
+      become: true
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ k3s_version.split('+')[0] }}/bin/linux/amd64/kubectl"
+        checksum: "sha256:https://dl.k8s.io/release/{{ k3s_version.split('+')[0] }}/bin/linux/amd64/kubectl.sha256"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+- name: Verify all three Kubernetes nodes
+  hosts: master
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for worker registration
+      ansible.builtin.command: k3s kubectl get nodes -o json
+      register: node_registration
+      until: (node_registration.stdout | from_json)['items'] | length == 3
+      retries: 60
+      delay: 5
+      changed_when: false
+    - name: Wait for Ready nodes
+      ansible.builtin.command: k3s kubectl wait nodes --all --for=condition=Ready --timeout=300s
+      changed_when: false
+    - name: Verify system deployments
+      ansible.builtin.command: k3s kubectl -n kube-system rollout status deployment/{{ item }} --timeout=300s
+      loop: [coredns, local-path-provisioner, metrics-server, traefik]
+      changed_when: false
+    - name: Show node addresses
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      register: ready_nodes
+      changed_when: false
+    - ansible.builtin.debug: {var: ready_nodes.stdout_lines}
+
+- name: Verify controller-to-cluster access
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Verify authenticated Kubernetes API access
+      ansible.builtin.command: kubectl get nodes -o wide
+      environment: {KUBECONFIG: /home/ubuntu/.kube/config}
+      register: controller_nodes
+      changed_when: false
+    - ansible.builtin.debug: {var: controller_nodes.stdout_lines}
