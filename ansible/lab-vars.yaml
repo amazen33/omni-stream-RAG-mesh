@@ -1,0 +1,131 @@
+---
+rag_namespace: rag
+rag_remote_dir: /opt/rag-mesh
+rag_image: localhost/rag-mesh
+rag_image_tag: lab-v1
+kubeconfig: /etc/rancher/k3s/k3s.yaml
+# Legacy K3s lab workflow only. Primary on-prem and cloud profiles use standard
+# kubectl with kubeadm, EKS, AKS, or another conformant Kubernetes distribution.
+kube_cli_argv: [k3s, kubectl]
+deployment_profile: onprem
+helm_version: v3.19.0
+storage_class: local-path
+minimum_node_memory_mb: 3500
+minimum_cluster_memory_mb: 16000
+install_cert_manager: true
+install_external_secrets: true
+install_argocd: false
+install_argo_rollouts: false
+# SPIRE's Kubernetes PSAT attestation is portable across kubeadm, EKS, AKS, and
+# other conformant clusters. Override these values per environment; never reuse
+# a production trust domain in a lab.
+mesh_enabled: true
+# K3s supplies Traefik. It is configured to inspect external traffic before
+# forwarding it to the private Istio gateway. Managed-cloud profiles keep this
+# false and point their provider WAF at the same gateway instead.
+waf_enabled: true
+spire_namespace: spire-mgmt
+spire_trust_domain: rag.lab.internal
+spire_cluster_name: rag-onprem-lab
+spire_jwt_issuer: "https://oidc-discovery.rag.lab.internal"
+# Replace these legal-entity subject values for every non-lab trust domain.
+spire_ca_country: ZZ
+spire_ca_organization: omni-stream-rag-mesh
+istio_namespace: istio-system
+istio_ingress_namespace: istio-ingress
+mesh_ingress_host: rag.internal.mesh
+operator_releases:
+  - name: strimzi
+    namespace: kafka
+    chart: strimzi/strimzi-kafka-operator
+    version: "0.51.0"
+    enabled: true
+    values: {watchAnyNamespace: true}
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: v1.18.2
+    enabled: "{{ install_cert_manager }}"
+    values: {crds: {enabled: true}}
+  - name: external-secrets
+    namespace: external-secrets
+    chart: external-secrets/external-secrets
+    version: "0.19.2"
+    enabled: "{{ install_external_secrets }}"
+    values: {installCRDs: true}
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: "8.3.5"
+    enabled: "{{ install_argocd }}"
+    values: {}
+  - name: argo-rollouts
+    namespace: argo-rollouts
+    chart: argo/argo-rollouts
+    version: "2.40.5"
+    enabled: "{{ install_argo_rollouts }}"
+    values: {}
+mesh_operator_releases:
+  # Istio's base CRDs must precede the control plane and gateway.
+  - name: istio-base
+    namespace: "{{ istio_namespace }}"
+    chart: istio/base
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {defaultRevision: default}
+  - name: istiod
+    namespace: "{{ istio_namespace }}"
+    chart: istio/istiod
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {profile: minimal}
+  # The gateway remains internal; on-prem Traefik/Coraza or a cloud WAF sends
+  # traffic to it. The gateway then uses mesh mTLS to reach rag-api.
+  - name: istio-ingress
+    namespace: "{{ istio_ingress_namespace }}"
+    chart: istio/gateway
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {service: {type: ClusterIP}}
+  # The hardened SPIRE chart supplies server, agent, controller manager, CSI
+  # driver, and OIDC discovery provider. These independent chart versions are
+  # pinned and must be deliberately reviewed before an upgrade.
+  - name: spire-crds
+    namespace: "{{ spire_namespace }}"
+    chart: spiffe/spire-crds
+    version: "0.5.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {}
+  - name: spire
+    namespace: "{{ spire_namespace }}"
+    chart: spiffe/spire
+    version: "0.30.0"
+    enabled: "{{ mesh_enabled }}"
+    values:
+      global:
+        openshift: false
+        spire:
+          recommendations: {enabled: true}
+          strictMode: true
+          namespaces: {create: true}
+          clusterName: "{{ spire_cluster_name }}"
+          trustDomain: "{{ spire_trust_domain }}"
+          jwtIssuer: "{{ spire_jwt_issuer }}"
+          caSubject:
+            country: "{{ spire_ca_country }}"
+            organization: "{{ spire_ca_organization }}"
+            commonName: "{{ spire_trust_domain }}"
+      spire-server:
+        persistence: {storageClass: "{{ storage_class }}"}
+        controllerManager:
+          enabled: true
+          identities:
+          clusterSPIFFEIDs:
+            default: {enabled: false}
+helm_repositories:
+  - {name: strimzi, url: "https://strimzi.io/charts/"}
+  - {name: jetstack, url: "https://charts.jetstack.io"}
+  - {name: external-secrets, url: "https://charts.external-secrets.io"}
+  - {name: argo, url: "https://argoproj.github.io/argo-helm"}
+  - {name: istio, url: "https://istio-release.storage.googleapis.com/charts"}
+  - {name: spiffe, url: "https://spiffe.github.io/helm-charts-hardened/"}
