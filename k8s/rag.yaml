@@ -15,6 +15,7 @@ data:
   CHROMA_URL: http://chromadb.rag.svc:8000
   SCHEMA_REGISTRY_URL: http://schema-registry.rag.svc:8081
   HEALTH_CHECK_TIMEOUT_SECONDS: "2"
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: {name: rag-data, namespace: rag}
@@ -25,13 +26,24 @@ spec:
 ---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: rag-api, namespace: rag, labels: {app: rag-api}}
+metadata:
+  name: rag-api
+  namespace: rag
+  labels:
+    app: rag-api
+    app.kubernetes.io/name: rag-api
 spec:
   replicas: 2
   selector: {matchLabels: {app: rag-api}}
   template:
-    metadata: {labels: {app: rag-api}}
+    metadata:
+      labels:
+        app: rag-api
+        app.kubernetes.io/name: rag-api
+      annotations:
+        sidecar.istio.io/inject: "true"
     spec:
+      serviceAccountName: rag-api
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
       - name: api
@@ -42,6 +54,16 @@ spec:
         startupProbe: {httpGet: {path: /health/startup, port: 8000}, failureThreshold: 30, periodSeconds: 5, timeoutSeconds: 3}
         readinessProbe: {httpGet: {path: /health/ready, port: 8000}, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 3}
         livenessProbe: {httpGet: {path: /health/live, port: 8000}, periodSeconds: 20, timeoutSeconds: 2}
+        volumeMounts:
+          - {name: spiffe-workload-api, mountPath: /run/spiffe/workload, readOnly: true}
+      volumes:
+        - name: spiffe-workload-api
+          csi: {driver: csi.spiffe.io, readOnly: true}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: rag-api, namespace: rag, labels: {app: rag-api, app.kubernetes.io/name: rag-api}}
+automountServiceAccountToken: false
 ---
 apiVersion: v1
 kind: Service
@@ -57,7 +79,36 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: rag-api-allow, namespace: rag}
 spec:
-  podSelector: {matchLabels: {app: rag-api}}
+  podSelector:
+    matchLabels:
+      app: rag-api
+      app.kubernetes.io/name: rag-api
   policyTypes: [Ingress, Egress]
-  ingress: [{from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}], ports: [{protocol: TCP, port: 8000}]}]
-  egress: [{to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: rag}}}], ports: [{protocol: TCP, port: 8000}, {protocol: TCP, port: 9000}, {protocol: TCP, port: 9092}, {protocol: TCP, port: 9200}, {protocol: TCP, port: 11434}]}]
+  ingress:
+    # Direct application ingress is accepted only from the Istio gateway.
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: istio-ingress}}
+      ports: [{protocol: TCP, port: 8000}]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: rag}}
+      ports:
+        - {protocol: TCP, port: 8000}
+        - {protocol: TCP, port: 9000}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 9200}
+        - {protocol: TCP, port: 11434}
+        - {protocol: TCP, port: 2113}
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 4317}
+    # Envoy needs xDS and certificate discovery from istiod.
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: istio-system}}
+      ports:
+        - {protocol: TCP, port: 15012}
+    # DNS must be explicitly permitted after the default-deny policy.
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
