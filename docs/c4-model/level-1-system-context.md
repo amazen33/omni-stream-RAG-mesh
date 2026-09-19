@@ -78,3 +78,29 @@ system --> registry
 system --> llm : sanitized prompts
 @enduml
 ```
+
+## Resilience and recovery context
+
+```mermaid
+flowchart LR
+    Client[API client] -->|TLS + correlation ID + traceparent| Edge[On-prem or cloud WAF]
+    Edge -->|private HTTP route| Gateway[Istio ingress gateway]
+    Gateway -->|sidecar mTLS| RAG[omni-stream-RAG-mesh]
+    SPIRE[SPIRE Server + Agent] -->|CSI workload SVID| RAG
+    Istiod[Istio control plane] -->|xDS / mesh identity| RAG
+    RAG --> Kafka[Kafka event mesh]
+    RAG --> Audit[MinIO/S3 Object-Lock audit]
+    RAG --> LGTM[OTel Collector → Tempo/Prometheus]
+    Kafka -. replicated events .-> DR[DR Kafka]
+    Velero[Velero snapshots] --> Audit
+    Velero --> State[Stateful PVCs]
+```
+
+The client-visible contract is a returned correlation ID and W3C traceparent.
+The platform records either a completed or compensated state transition. The
+edge is an organization/provider WAF in the primary kubeadm and cloud profiles;
+the retained K3s lab uses Traefik/Coraza. All route only to the private Istio
+gateway. SPIRE provides an application SVID through the CSI driver while Istio
+sidecars enforce workload mTLS. Kafka, Object Lock, and LGTM are separate system
+boundaries; Velero protects the Kubernetes/PVC recovery path rather than
+replacing immutable audit retention.
