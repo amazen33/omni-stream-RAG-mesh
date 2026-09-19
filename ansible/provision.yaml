@@ -1,31 +1,258 @@
 ---
-- name: Provision hybrid RAG node
-  hosts: all
+# Legacy K3s-only local-lab application workflow. The project default is now
+# kubeadm/containerd via playbook.yaml; do not use this on cloud or production.
+- name: Inspect existing K3s nodes before changing anything
+  any_errors_fatal: true
+  hosts: master:workers
   become: true
-  vars:
-    ollama_models: ["nomic-embed-text", "llama3.2:3b"]
+  gather_facts: true
+  vars_files: [lab-vars.yaml]
   tasks:
-    - name: Install Docker and utilities
+    - name: Require the expected lab topology and operating system
+      ansible.builtin.assert:
+        that:
+          - groups['master'] | length == 1
+          - groups['workers'] | length == 2
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['architecture'] == 'x86_64'
+          - ansible_facts['memtotal_mb'] | int >= minimum_node_memory_mb
+        fail_msg: Require one master and two workers running amd64 Debian/Ubuntu with adequate memory.
+    - name: Inspect K3s binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+    - name: Preserve existing Kubernetes distribution
+      ansible.builtin.assert:
+        that: k3s_binary.stat.exists
+        fail_msg: Existing K3s is required. This workflow never resets cluster membership.
+    - name: Inspect container storage capacity
+      ansible.builtin.command: df --output=avail -k /var/lib
+      register: disk_space
+      changed_when: false
+    - ansible.builtin.assert:
+        that: (disk_space.stdout_lines[-1] | trim | int) > 20971520
+        fail_msg: Require at least 20 GiB free on each node for image builds and lab data.
+
+- name: Validate cluster identity and storage before provisioning
+  any_errors_fatal: true
+  hosts: master
+  become: true
+  gather_facts: false
+  vars_files: [lab-vars.yaml]
+  environment: {KUBECONFIG: "{{ kubeconfig }}"}
+  tasks:
+    - name: Read node inventory
+      ansible.builtin.command: k3s kubectl get nodes -o json
+      register: cluster_nodes
+      changed_when: false
+    - name: Require each supplied address to belong to the cluster
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].ansible_host in ((cluster_nodes.stdout | from_json)['items'] | map(attribute='status.addresses') | flatten | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list)
+        fail_msg: Inventory IP is not a registered node InternalIP. Correct it before provisioning.
+      loop: "{{ (groups['master'] + groups['workers']) }}"
+    - name: Read Kubernetes version
+      ansible.builtin.command: k3s kubectl version -o json
+      register: cluster_version
+      changed_when: false
+    - name: Check operator compatibility and aggregate memory
+      ansible.builtin.assert:
+        that:
+          - ((cluster_version.stdout | from_json).serverVersion.minor | regex_replace('[^0-9]', '') | int) >= 30
+          - ((cluster_version.stdout | from_json).serverVersion.minor | regex_replace('[^0-9]', '') | int) <= 35
+          - (groups['master'] + groups['workers']) | map('extract', hostvars, ['ansible_facts', 'memtotal_mb']) | map('int') | sum >= minimum_cluster_memory_mb
+        fail_msg: Pinned Strimzi requires Kubernetes 1.30-1.35; the full lab requires 16 GiB aggregate node memory.
+    - name: Wait for existing nodes
+      ansible.builtin.command: k3s kubectl wait nodes --all --for=condition=Ready --timeout=180s
+      changed_when: false
+    - name: Verify storage class
+      ansible.builtin.command:
+        argv: [k3s, kubectl, get, storageclass, "{{ storage_class }}"]
+      changed_when: false
+
+- name: Build and import application on every node
+  any_errors_fatal: true
+  hosts: master:workers
+  become: true
+  gather_facts: false
+  vars_files: [lab-vars.yaml]
+  tasks:
+    - name: Install image builder and prerequisites
       ansible.builtin.apt:
-        name:
-          - docker.io
-          - docker-compose
-          - curl
+        name: [docker.io, curl, ca-certificates, python3]
         state: present
         update_cache: true
+        cache_valid_time: 3600
+    - name: Start Docker for image builds
+      ansible.builtin.service: {name: docker, state: started, enabled: true}
+    - name: Persist OpenSearch mmap limit
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/90-rag-opensearch.conf
+        content: "vm.max_map_count=262144\n"
+        mode: '0644'
+      register: sysctl_file
+    - name: Apply mmap limit
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/90-rag-opensearch.conf
+      when: sysctl_file.changed
+    - name: Create isolated source directory
+      ansible.builtin.file: {path: "{{ rag_remote_dir }}/src", state: directory, mode: '0755'}
+    - name: Copy application inputs only
+      ansible.builtin.copy:
+        src: "{{ rag_source_dir | default(playbook_dir ~ '/..') }}/{{ item }}"
+        dest: "{{ rag_remote_dir }}/src/"
+        mode: preserve
+      loop: [Dockerfile, requirements.txt, app, contexts, domain, ops]
+      register: source_copy
+    - name: Inspect imported images
+      ansible.builtin.command: k3s ctr images list -q
+      register: imported_images
+      changed_when: false
+    - name: Build and import changed image
+      when: source_copy.changed or (rag_image ~ ':' ~ rag_image_tag) not in imported_images.stdout_lines
+      block:
+        - name: Build image
+          ansible.builtin.command:
+            argv: [docker, build, --tag, "{{ rag_image }}:{{ rag_image_tag }}", "{{ rag_remote_dir }}/src"]
+          async: 2400
+          poll: 15
+        - name: Export image
+          ansible.builtin.command:
+            argv: [docker, save, --output, "{{ rag_remote_dir }}/rag-image.tar", "{{ rag_image }}:{{ rag_image_tag }}"]
+        - name: Import image into K3s containerd
+          ansible.builtin.command:
+            argv: [k3s, ctr, images, import, "{{ rag_remote_dir }}/rag-image.tar"]
+        - name: Remove temporary export
+          ansible.builtin.file: {path: "{{ rag_remote_dir }}/rag-image.tar", state: absent}
 
-    - name: Add operator to docker group
-      ansible.builtin.user:
-        name: "{{ ansible_user }}"
-        groups: docker
-        append: true
-
-    - name: Create persistent directories
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        mode: '0750'
-      loop:
-        - /opt/rag/minio
-        - /opt/rag/ollama
-        - /opt/rag/opensearch
+- name: Install operators, persistent dependencies, and application
+  any_errors_fatal: true
+  hosts: master
+  become: true
+  gather_facts: false
+  vars_files: [lab-vars.yaml]
+  environment: {KUBECONFIG: "{{ kubeconfig }}"}
+  tasks:
+    - name: Download checksum-verified Helm
+      ansible.builtin.get_url:
+        url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+        checksum: "sha256:https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz.sha256sum"
+        dest: "{{ rag_remote_dir }}/helm.tar.gz"
+        mode: '0644'
+    - name: Extract Helm
+      ansible.builtin.unarchive:
+        src: "{{ rag_remote_dir }}/helm.tar.gz"
+        dest: "{{ rag_remote_dir }}"
+        remote_src: true
+    - name: Install Helm executable
+      ansible.builtin.copy:
+        src: "{{ rag_remote_dir }}/linux-amd64/helm"
+        dest: /usr/local/bin/helm
+        remote_src: true
+        mode: '0755'
+    - name: Register chart repositories
+      ansible.builtin.command:
+        argv: [helm, repo, add, "{{ item.name }}", "{{ item.url }}", --force-update]
+      loop: "{{ helm_repositories }}"
+      changed_when: false
+    - name: Refresh indexes
+      ansible.builtin.command: helm repo update
+      changed_when: false
+    - name: Install pinned operators
+      ansible.builtin.include_tasks: tasks/operator.yaml
+      loop: "{{ operator_releases }}"
+      loop_control: {loop_var: operator}
+      when: operator.enabled | bool
+    - name: Write namespace manifest
+      ansible.builtin.copy:
+        dest: "{{ rag_remote_dir }}/namespace.yaml"
+        mode: '0644'
+        content: "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {{ rag_namespace }}\n"
+    - name: Ensure namespace exists before mesh identity registration
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['apply', '-f', rag_remote_dir ~ '/namespace.yaml'] }}"
+      register: namespace_apply
+      changed_when: "'created' in namespace_apply.stdout or 'configured' in namespace_apply.stdout"
+    - name: Install and configure SPIFFE workload identity and Istio mesh
+      ansible.builtin.include_tasks: tasks/mesh.yaml
+      when: mesh_enabled | bool
+    - name: Configure the on-prem Traefik and Coraza edge WAF
+      ansible.builtin.include_tasks: tasks/onprem-waf.yaml
+      when:
+        - mesh_enabled | bool
+        - waf_enabled | bool
+        - deployment_profile == 'onprem'
+    - name: Copy charts and lab overrides
+      ansible.builtin.copy:
+        src: "{{ rag_source_dir | default(playbook_dir ~ '/..') }}/{{ item }}"
+        dest: "{{ rag_remote_dir }}/"
+        mode: preserve
+      loop: [rag-chart, deploy/lab-infra, deploy/lab-values.yaml]
+    - name: Generate or preserve lab secrets
+      ansible.builtin.script: files/create_lab_secret.py {{ rag_namespace }}
+      args: {executable: python3}
+      no_log: true
+    - name: Lint infrastructure chart
+      ansible.builtin.command:
+        argv: [helm, lint, "{{ rag_remote_dir }}/lab-infra"]
+      changed_when: false
+    - name: Install dependency workloads
+      ansible.builtin.command:
+        argv: [helm, upgrade, --install, rag-infra, "{{ rag_remote_dir }}/lab-infra", --namespace, "{{ rag_namespace }}", --set, "storageClass={{ storage_class }}", --wait, --timeout, 20m]
+      async: 1500
+      poll: 15
+    - name: Wait for Kafka quorum
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'wait', 'kafka/kafka', '--for=condition=Ready', '--timeout=900s'] }}"
+      async: 1000
+      poll: 15
+      changed_when: false
+    - name: Load Ollama models
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'exec', 'deployment/ollama', '--', 'ollama', 'pull', item] }}"
+      loop: [nomic-embed-text, "llama3.2:3b"]
+      async: 1800
+      poll: 15
+    - name: Create synthetic payment CDC table if absent
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'exec', 'deployment/postgres', '--', 'psql', '-U', 'rag', '-d', 'transactions', '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE TABLE IF NOT EXISTS public.transactions (transaction_id text PRIMARY KEY, merchant_id text NOT NULL, amount_minor bigint NOT NULL, currency varchar(3) NOT NULL);'] }}"
+    - name: Lint application chart
+      ansible.builtin.command:
+        argv: [helm, lint, "{{ rag_remote_dir }}/rag-chart", -f, "{{ rag_remote_dir }}/lab-values.yaml", --set, "ragApi.image.repository={{ rag_image }},ragApi.image.tag={{ rag_image_tag }}"]
+      changed_when: false
+    - name: Deploy application
+      ansible.builtin.command:
+        argv: [helm, upgrade, --install, rag, "{{ rag_remote_dir }}/rag-chart", --namespace, "{{ rag_namespace }}", -f, "{{ rag_remote_dir }}/lab-values.yaml", --set, "ragApi.image.repository={{ rag_image }},ragApi.image.tag={{ rag_image_tag }}", --wait, --timeout, 10m]
+    - name: Restart after local image refresh
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'rollout', 'restart', 'deployment/rag-api'] }}"
+      when: (groups['master'] + groups['workers']) | map('extract', hostvars, ['source_copy', 'changed']) | select('equalto', true) | list | length > 0
+    - name: Wait for rollout
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'rollout', 'status', 'deployment/rag-api', '--timeout=600s'] }}"
+      changed_when: false
+    - name: Read the deployed rag-api pod definition
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'get', 'pods', '-l', 'app.kubernetes.io/name=rag-api', '-o', 'json'] }}"
+      register: rag_api_pods
+      changed_when: false
+      when: mesh_enabled | bool
+    - name: Verify Istio sidecar and SPIFFE CSI mount are active
+      ansible.builtin.assert:
+        that:
+          - (rag_api_pods.stdout | from_json).items | length > 0
+          - "'istio-proxy' in ((rag_api_pods.stdout | from_json).items[0].spec.containers | map(attribute='name') | list)"
+          - "'spiffe-workload-api' in ((rag_api_pods.stdout | from_json).items[0].spec.volumes | map(attribute='name') | list)"
+        fail_msg: rag-api must be sidecar-injected and mount the SPIFFE CSI volume before strict mTLS is accepted.
+      when: mesh_enabled | bool
+    - name: Verify readiness through Kubernetes service proxy
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['get', '--raw', '/api/v1/namespaces/' ~ rag_namespace ~ '/services/rag-api:8000/proxy/health/ready'] }}"
+      register: readiness
+      changed_when: false
+      failed_when: readiness.rc != 0 or (readiness.stdout | from_json).status != 'ok'
+    - name: Inspect resulting resources
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'get', 'pods,pvc,services'] }}"
+      register: deployment_status
+      changed_when: false
+    - ansible.builtin.debug: {var: deployment_status.stdout_lines}
