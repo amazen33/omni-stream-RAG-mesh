@@ -1,0 +1,80 @@
+# Apply only after Istio and the SPIRE hardened chart are healthy. The
+# ClusterSPIFFEID uses the controller's configured .TrustDomain rather than a
+# literal environment name, so the same manifest is safe for on-prem, AWS, and
+# Azure clusters. Ansible configures that trust domain before applying this.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: rag-api-edge
+  namespace: rag
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port: {number: 80, name: http, protocol: HTTP}
+      hosts: ["rag.internal.mesh"]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rag-api-edge
+  namespace: rag
+spec:
+  hosts: ["rag.internal.mesh"]
+  gateways: [rag-api-edge]
+  http:
+    - route:
+        - destination:
+            host: rag-api.rag.svc.cluster.local
+            port: {number: 8000}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: rag-api-ingress
+  namespace: rag
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+      app: rag-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["istio-ingress"]
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: rag-api
+  labels:
+    app.kubernetes.io/part-of: omni-stream-rag-mesh
+spec:
+  # .TrustDomain is rendered by the SPIRE Controller Manager from the trust
+  # domain installed for this cluster, not by Kubernetes or a shell.
+  spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: rag
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+      app: rag-api
+  dnsNameTemplates:
+    - "rag-api.{{ .PodMeta.Namespace }}.svc.{{ .ClusterDomain }}"
+---
+# Keep this last: the gateway has been configured before direct plaintext
+# access to the selected rag-api workload becomes invalid.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: rag-api-strict-mtls
+  namespace: rag
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+      app: rag-api
+  mtls:
+    mode: STRICT
