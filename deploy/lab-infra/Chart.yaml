@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rag-lab-infrastructure
+description: Private single-cluster RAG lab dependencies; not a production HA profile
+type: application
+version: 0.1.0

@@ -1,0 +1,108 @@
+storageClass: local-path
+kafka:
+  version: "4.2.0"
+  replicas: 3
+  storage: 10Gi
+components:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    port: 9000
+    args: [server, /data]
+    storage: {size: 10Gi, mount: /data}
+    secretEnv: {MINIO_ROOT_USER: AWS_ACCESS_KEY_ID, MINIO_ROOT_PASSWORD: AWS_SECRET_ACCESS_KEY}
+    healthPath: /minio/health/live
+    memory: 512Mi
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    port: 8000
+    storage: {size: 5Gi, mount: /chroma/chroma}
+    env: {IS_PERSISTENT: "TRUE", ANONYMIZED_TELEMETRY: "FALSE"}
+    healthPath: /api/v1/heartbeat
+    memory: 1Gi
+  ollama:
+    image: ollama/ollama:0.5.4
+    port: 11434
+    storage: {size: 10Gi, mount: /root/.ollama}
+    healthPath: /
+    memory: 4Gi
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    port: 9200
+    storage: {size: 10Gi, mount: /usr/share/opensearch/data}
+    uid: 1000
+    env:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    healthPath: /_cluster/health
+    memory: 1536Mi
+  postgres:
+    image: postgres:15-alpine
+    port: 5432
+    args: [postgres, -c, wal_level=logical]
+    storage: {size: 5Gi, mount: /var/lib/postgresql/data}
+    env: {POSTGRES_USER: rag, POSTGRES_DB: transactions, PGDATA: /var/lib/postgresql/data/pgdata}
+    secretEnv: {POSTGRES_PASSWORD: POSTGRES_PASSWORD}
+    memory: 512Mi
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.8.0
+    port: 8081
+    env:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-kafka-bootstrap:9092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: "3"
+    healthPath: /subjects
+    memory: 768Mi
+  debezium:
+    image: quay.io/debezium/connect:2.7.3.Final
+    port: 8083
+    env:
+      BOOTSTRAP_SERVERS: kafka-kafka-bootstrap:9092
+      GROUP_ID: rag-connect
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: "3"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "3"
+      STATUS_STORAGE_REPLICATION_FACTOR: "3"
+    healthPath: /connectors
+    memory: 1Gi
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    port: 9090
+    args: [--config.file=/etc/rag/config.yaml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=3d]
+    storage: {size: 5Gi, mount: /prometheus}
+    uid: 65534
+    config: prometheus
+    healthPath: /-/ready
+    memory: 512Mi
+  grafana:
+    image: grafana/grafana:11.6.0
+    port: 3000
+    storage: {size: 2Gi, mount: /var/lib/grafana}
+    uid: 472
+    secretEnv: {GF_SECURITY_ADMIN_PASSWORD: GRAFANA_ADMIN_PASSWORD}
+    env: {GF_AUTH_ANONYMOUS_ENABLED: "false"}
+    healthPath: /api/health
+    memory: 512Mi
+  loki:
+    image: grafana/loki:3.4.2
+    port: 3100
+    args: [-config.file=/etc/rag/config.yaml]
+    storage: {size: 5Gi, mount: /loki}
+    uid: 10001
+    config: loki
+    healthPath: /ready
+    memory: 512Mi
+  tempo:
+    image: grafana/tempo:2.7.2
+    port: 3200
+    extraPorts: [{name: otlp-grpc, port: 4317}, {name: otlp-http, port: 4318}]
+    args: [-config.file=/etc/rag/config.yaml]
+    storage: {size: 5Gi, mount: /tempo}
+    uid: 10001
+    config: tempo
+    healthPath: /ready
+    memory: 512Mi

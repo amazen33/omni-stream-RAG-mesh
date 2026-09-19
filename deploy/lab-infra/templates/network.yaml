@@ -1,0 +1,25 @@
+# Lab-level segmentation: only same-namespace clients and the Kafka operator.
+# Fine-grained workload authorization and mesh TLS require a separate profile.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-lab-private
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kafka}
+  egress:
+    - to: [{podSelector: {}}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # HTTPS model downloads and Kubernetes operator control-plane requests.
+    - ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 6443}]

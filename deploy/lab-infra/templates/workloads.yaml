@@ -1,0 +1,108 @@
+{{- range $name, $component := .Values.components }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector: {rag-component: {{ $name }}}
+  ports:
+    - name: http
+      port: {{ $component.port }}
+      targetPort: main
+    {{- range $component.extraPorts }}
+    - {name: {{ .name }}, port: {{ .port }}, targetPort: {{ .name }}}
+    {{- end }}
+{{- if $component.storage }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-data
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ $.Values.storageClass | quote }}
+  resources:
+    requests: {storage: {{ $component.storage.size }}}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {rag-component: {{ $name }}}
+  template:
+    metadata:
+      labels: {rag-component: {{ $name }}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+        {{- if $component.uid }}
+        runAsUser: {{ $component.uid }}
+        fsGroup: {{ $component.uid }}
+        {{- end }}
+      containers:
+        - name: main
+          image: {{ $component.image | quote }}
+          {{- with $component.args }}
+          args: {{ toJson . }}
+          {{- end }}
+          ports:
+            - {name: main, containerPort: {{ $component.port }}}
+            {{- range $component.extraPorts }}
+            - {name: {{ .name }}, containerPort: {{ .port }}}
+            {{- end }}
+          env:
+            {{- range $key, $value := $component.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $secretKey := $component.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef: {name: rag-secrets, key: {{ $secretKey }}}
+            {{- end }}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "2", memory: {{ $component.memory }}}
+          securityContext:
+            allowPrivilegeEscalation: false
+          startupProbe:
+            tcpSocket: {port: main}
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            {{- if $component.healthPath }}
+            httpGet: {path: {{ $component.healthPath | quote }}, port: main}
+            {{- else }}
+            tcpSocket: {port: main}
+            {{- end }}
+            timeoutSeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            {{- if $component.storage }}
+            - {name: data, mountPath: {{ $component.storage.mount }}}
+            {{- end }}
+            {{- if $component.config }}
+            - {name: config, mountPath: /etc/rag, readOnly: true}
+            {{- end }}
+      volumes:
+        {{- if $component.storage }}
+        - name: data
+          persistentVolumeClaim: {claimName: {{ $name }}-data}
+        {{- end }}
+        {{- if $component.config }}
+        - name: config
+          configMap: {name: {{ $component.config }}-config}
+        {{- end }}
+{{- end }}

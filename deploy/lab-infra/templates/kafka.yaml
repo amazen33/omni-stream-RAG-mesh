@@ -1,0 +1,51 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: combined
+  namespace: {{ .Release.Namespace }}
+  labels: {strimzi.io/cluster: kafka}
+spec:
+  replicas: {{ .Values.kafka.replicas }}
+  roles: [controller, broker]
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ .Values.kafka.storage }}
+        class: {{ .Values.storageClass }}
+        deleteClaim: false
+        kraftMetadata: shared
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: {{ .Release.Namespace }}
+spec:
+  kafka:
+    version: {{ .Values.kafka.version | quote }}
+    listeners:
+      - {name: internal, port: 9092, type: internal, tls: false}
+    config:
+      auto.create.topics.enable: true
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+    resources:
+      requests: {cpu: 250m, memory: 768Mi}
+      limits: {cpu: "1", memory: 1536Mi}
+    jvmOptions: {"-Xms": 512m, "-Xmx": 512m}
+    template:
+      pod:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {strimzi.io/name: kafka-kafka}
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
