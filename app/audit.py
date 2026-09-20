@@ -109,6 +109,24 @@ class AuditSink:
         )
         return now, key
 
+    def healthcheck(self, timeout: float | None = None) -> None:
+        """Perform the least-privileged health operation for the selected backend."""
+        if not self.enabled:
+            raise LookupError("not configured")
+        resolved_timeout = timeout if timeout is not None else self.gcs_timeout
+        if self.s3 is not None:
+            self.s3.head_bucket(Bucket=self.bucket)
+            return
+        if self.azure_container is not None:
+            self.azure_container.get_container_properties(timeout=resolved_timeout)
+            return
+        if self.gcs_bucket is not None:
+            # ``reload`` validates access and the Bucket Lock state was already
+            # required when the adapter was constructed.
+            self.gcs_bucket.reload(timeout=resolved_timeout)
+            return
+        raise RuntimeError("audit store client unavailable")
+
     def _persist(self, key: str, record: Dict[str, Any], now: datetime) -> str:
         # A caller cannot accidentally bypass the privacy boundary by sending
         # an unreviewed payload to the sink.  Correlation and request IDs stay
