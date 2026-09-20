@@ -28,9 +28,14 @@ def test_kubeadm_bootstrap_installs_a_safe_standard_stack() -> None:
     assert "Existing K3s or kubeadm state was found" in bootstrap
     assert "calico_crds_manifest_url" in bootstrap
     assert "calico_operator_manifest_url" in bootstrap
+    assert "failed_when: false" in bootstrap
+    assert "not containerd_config.stat.exists" in bootstrap
+    assert "install_local_path_provisioner" in bootstrap
     assert "kubernetes_minor: v1.35" in variables
     assert "calico_version: v3.32.2" in variables
     assert "calico/{{ calico_version }}" in variables
+    assert "local_path_provisioner_version: v0.0.36" in variables
+    assert "local-path-provisioner/{{ local_path_provisioner_version }}" in variables
 
 
 def test_mesh_namespace_is_created_before_mesh_resources() -> None:
