@@ -13,12 +13,13 @@
       ansible.builtin.assert:
         that:
           - groups['master'] | length == 1
-          - groups['workers'] | length >= 2
+          - groups['workers'] | length >= minimum_worker_count | int
+          - not (full_streaming_lab | bool) or (groups['workers'] | length >= 3)
           - ansible_facts['os_family'] == 'Debian'
           - ansible_facts['architecture'] == 'x86_64'
           - ansible_facts['memtotal_mb'] | int >= 3500
           - ansible_facts['processor_vcpus'] | int >= 2
-        fail_msg: Require one new amd64 Debian/Ubuntu control plane and at least two workers with 2 CPUs and 3.5 GiB RAM each.
+        fail_msg: Require one new amd64 Debian/Ubuntu control plane and the configured workers with 2 CPUs and 3.5 GiB RAM each; the full three-replica streaming lab needs three workers.
 
     - name: Refuse to modify an existing Kubernetes distribution
       ansible.builtin.stat:
@@ -29,10 +30,17 @@
         - /etc/kubernetes/kubelet.conf
       register: existing_kubernetes_files
 
+    - name: Inspect the resumable bootstrap marker
+      ansible.builtin.stat:
+        path: "{{ kubeadm_state_marker }}"
+      register: kubeadm_bootstrap_marker
+
     - name: Confirm the nodes are safe to bootstrap
       ansible.builtin.assert:
-        that: existing_kubernetes_files.results | map(attribute='stat.exists') | select | list | length == 0
-        fail_msg: Existing K3s or kubeadm state was found. Do not convert a live cluster; build new nodes or use the prepared-cluster mesh play.
+        that: >-
+          (kubeadm_bootstrap_marker.stat.exists | bool) or
+          (existing_kubernetes_files.results | map(attribute='stat.exists') | select | list | length == 0)
+        fail_msg: Existing K3s or kubeadm state was found without this playbook's marker. Do not convert a live cluster; build new nodes or use the prepared-cluster mesh play.
 
     - name: Install container runtime and package prerequisites
       ansible.builtin.apt:
@@ -102,7 +110,7 @@
 
     - name: Download the Kubernetes package signing key
       ansible.builtin.get_url:
-        url: "{{ kubernetes_apt_repository }}Release.key"
+        url: "{{ kubernetes_release_key_url }}"
         dest: /tmp/kubernetes-release.key
         mode: '0644'
 
@@ -138,8 +146,8 @@
 
     - name: Download Helm for cluster add-ons
       ansible.builtin.get_url:
-        url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
-        checksum: "sha256:https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz.sha256sum"
+        url: "{{ helm_download_url }}"
+        checksum: "sha256:{{ helm_download_url }}.sha256sum"
         dest: /tmp/helm.tar.gz
         mode: '0644'
 
@@ -191,6 +199,12 @@
       async: 1200
       poll: 15
 
+    - name: Mark the initialized control plane as resumable
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_state_marker }}"
+        content: "kubeadm control plane initialized by omni-stream-RAG-mesh\n"
+        mode: '0600'
+
     - name: Wait for Kubernetes API readiness
       ansible.builtin.command: kubectl get --raw=/readyz
       register: kubeadm_api_ready
@@ -205,14 +219,14 @@
 
     - name: Install Calico CRDs for Kubernetes NetworkPolicies
       ansible.builtin.command:
-        argv: [kubectl, create, -f, "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/v1_crd_projectcalico_org.yaml"]
+        argv: [kubectl, create, -f, "{{ calico_crds_manifest_url }}"]
       register: calico_crds
       changed_when: "'created' in calico_crds.stdout"
       failed_when: calico_crds.rc != 0 and 'AlreadyExists' not in calico_crds.stderr
 
     - name: Install the pinned Calico operator
       ansible.builtin.command:
-        argv: [kubectl, create, -f, "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"]
+        argv: [kubectl, create, -f, "{{ calico_operator_manifest_url }}"]
       register: calico_operator
       changed_when: "'created' in calico_operator.stdout"
       failed_when: calico_operator.rc != 0 and 'AlreadyExists' not in calico_operator.stderr
@@ -230,7 +244,19 @@
       changed_when: "'created' in calico_installation.stdout"
       failed_when: calico_installation.rc != 0 and 'AlreadyExists' not in calico_installation.stderr
 
-    - name: Wait for Calico networking
+    - name: Wait for Calico operator status to become Available
+      ansible.builtin.command:
+        argv: [kubectl, get, tigerastatus, calico, -o, json]
+      register: calico_status
+      until: >-
+        (calico_status.stdout | from_json)['status']['conditions'] |
+        selectattr('type', 'equalto', 'Available') |
+        selectattr('status', 'equalto', 'True') | list | length > 0
+      retries: 60
+      delay: 10
+      changed_when: false
+
+    - name: Wait for Calico networking after the operator creates calico-node
       ansible.builtin.command:
         argv: [kubectl, -n, calico-system, rollout, status, daemonset/calico-node, --timeout=600s]
       changed_when: false
@@ -259,6 +285,12 @@
         creates: /etc/kubernetes/kubelet.conf
       no_log: true
 
+    - name: Mark the joined worker as resumable
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_state_marker }}"
+        content: "kubeadm worker joined by omni-stream-RAG-mesh\n"
+        mode: '0600'
+
 - name: Verify the upstream Kubernetes cluster
   hosts: master
   become: true
@@ -271,7 +303,7 @@
     - name: Wait for all inventory nodes to register
       ansible.builtin.command: kubectl get nodes -o json
       register: kubeadm_nodes
-      until: (kubeadm_nodes.stdout | from_json).items | length == (groups['master'] + groups['workers']) | length
+      until: (kubeadm_nodes.stdout | from_json)['items'] | length == (groups['master'] + groups['workers']) | length
       retries: 60
       delay: 5
       changed_when: false
