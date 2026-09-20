@@ -8,6 +8,10 @@ from typing import Dict, Tuple
 _lock = Lock()
 _counters: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
 _gauges: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+_histogram_counts: dict[tuple[str, tuple[tuple[str, str], ...], float], int] = defaultdict(int)
+_histogram_sums: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
+_histogram_observations: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
+_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 # Help text and type catalog for standard metrics
 _METRIC_HELP: dict[str, str] = {
@@ -29,7 +33,7 @@ _METRIC_TYPES: dict[str, str] = {
     "rag_bulkhead_active": "gauge",
     "rag_bulkhead_rejections_total": "counter",
     "rag_ratelimit_rejections_total": "counter",
-    "rag_boundary_duration_seconds": "gauge",
+    "rag_boundary_duration_seconds": "histogram",
     "rag_downstream_failures_total": "counter",
     "rag_compensating_events_total": "counter",
 }
@@ -70,7 +74,14 @@ def observe_ratelimit_rejection(boundary: str) -> None:
 
 
 def observe_boundary_duration(boundary: str, operation: str, duration_seconds: float) -> None:
-    set_gauge("rag_boundary_duration_seconds", duration_seconds, {"boundary": boundary, "operation": operation})
+    labels = _label_tuple({"boundary": boundary, "operation": operation})
+    with _lock:
+        metric = "rag_boundary_duration_seconds"
+        _histogram_sums[(metric, labels)] += duration_seconds
+        _histogram_observations[(metric, labels)] += 1
+        for bucket in _DURATION_BUCKETS:
+            if duration_seconds <= bucket:
+                _histogram_counts[(metric, labels, bucket)] += 1
 
 
 def observe_downstream_failure(boundary: str, dependency: str) -> None:
@@ -108,6 +119,31 @@ def exposition() -> str:
                     lines.append(f"{metric}{{{lbl_str}}} {val:g}")
                 else:
                     lines.append(f"{metric} {val:g}")
+
+        histogram_names = {
+            metric for metric, metric_type in _METRIC_TYPES.items() if metric_type == "histogram"
+        }
+        for metric in sorted(histogram_names):
+            lines.append(f"# HELP {metric} {_METRIC_HELP[metric]}")
+            lines.append(f"# TYPE {metric} histogram")
+            label_sets = {
+                labels for (name, labels) in _histogram_observations if name == metric
+            }
+            for labels in sorted(label_sets):
+                for bucket in _DURATION_BUCKETS:
+                    count = _histogram_counts[(metric, labels, bucket)]
+                    rendered = list(labels) + [("le", f"{bucket:g}")]
+                    lines.append(
+                        f'{metric}_bucket{{' + ",".join(f'{key}="{value}"' for key, value in rendered) + f"}} {count}"
+                    )
+                count = _histogram_observations[(metric, labels)]
+                rendered = list(labels) + [("le", "+Inf")]
+                lines.append(
+                    f'{metric}_bucket{{' + ",".join(f'{key}="{value}"' for key, value in rendered) + f"}} {count}"
+                )
+                label_text = ",".join(f'{key}="{value}"' for key, value in labels)
+                lines.append(f"{metric}_sum{{{label_text}}} {_histogram_sums[(metric, labels)]:.6f}")
+                lines.append(f"{metric}_count{{{label_text}}} {count}")
 
         # Group gauges by metric name
         gauge_families: dict[str, list[tuple[tuple[tuple[str, str], ...], float]]] = defaultdict(list)
