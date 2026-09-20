@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,7 +11,7 @@ def _read(relative_path: str) -> str:
 
 
 def test_spire_stack_is_pinned_and_enables_required_components() -> None:
-    values = _read("ansible/lab-vars.yaml")
+    values = _read("ansible/mesh-vars.yaml")
 
     assert "chart: spiffe/spire-crds" in values
     assert 'version: "0.5.0"' in values
@@ -20,17 +22,28 @@ def test_spire_stack_is_pinned_and_enables_required_components() -> None:
     assert "trustDomain:" in values
     assert "clusterName:" in values
     assert "jwtIssuer:" in values
+    assert "labels: {istio: ingressgateway}" in values
+
+
+def test_spire_identity_defaults_are_nested_in_chart_values() -> None:
+    values = yaml.safe_load(_read("ansible/mesh-vars.yaml"))
+    spire = next(item for item in values["mesh_operator_releases"] if item["name"] == "spire")
+
+    identities = spire["values"]["spire-server"]["controllerManager"]["identities"]
+    assert identities["clusterSPIFFEIDs"]["default"]["enabled"] is False
 
 
 def test_mesh_registration_is_narrow_and_portable() -> None:
-    manifest = _read("k8s/service-mesh.yaml")
+    manifest = _read("ansible/templates/service-mesh.yaml.j2")
 
     assert "kind: ClusterSPIFFEID" in manifest
-    assert "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}" in manifest
+    assert "spiffeIDTemplate:" in manifest
+    assert "{{ .TrustDomain }}" in manifest
     assert "namespaceSelector:" in manifest
     assert "app.kubernetes.io/name: rag-api" in manifest
     assert "workloadSelectorTemplates" not in manifest
     assert "mode: STRICT" in manifest
+    assert "paths: [\"/stats/prometheus\"]" in manifest
 
 
 def test_rag_workload_uses_the_spiffe_csi_volume_when_mesh_enabled() -> None:
@@ -41,6 +54,8 @@ def test_rag_workload_uses_the_spiffe_csi_volume_when_mesh_enabled() -> None:
     assert "driver: {{ .Values.mesh.spiffe.csiDriver | quote }}" in deployment
     assert "spiffe-workload-api" in deployment
     assert "enabled: false" in values
+    assert "REQUIRE_SPIFFE_SVID" in deployment
+    assert "automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}" in deployment
 
 
 def test_edge_waf_routes_to_istio_not_directly_to_the_workload() -> None:
@@ -54,12 +69,32 @@ def test_edge_waf_routes_to_istio_not_directly_to_the_workload() -> None:
 
 
 def test_cloud_profile_and_terraform_contract_are_documented() -> None:
-    profile = _read("docs/platform-profiles.md")
+    profile = _read("docs/ARCHITECTURE_AND_OPERATIONS.md")
 
     assert "ansible/configure-mesh.yaml" in profile
     assert "AWS EKS" in profile
     assert "Azure AKS" in profile
-    for relative_path in ("terraform/aws/main.tf", "terraform/azure/main.tf"):
+    assert "Google GKE" in profile
+    for relative_path in ("terraform/aws/main.tf", "terraform/azure/main.tf", "terraform/gcp/main.tf"):
         terraform = _read(relative_path)
         assert "variable \"spire_trust_domain\"" in terraform
         assert "output \"mesh_deployment_contract\"" in terraform
+    gcp_terraform = _read("terraform/gcp/main.tf")
+    assert "is_locked        = true" in gcp_terraform
+    assert "variable \"gke_workload_identity_pool\"" in gcp_terraform
+    assert "local.gke_workload_identity_pool" in gcp_terraform
+
+
+def test_portable_deployment_play_uses_helm_and_asserts_mesh_injection() -> None:
+    deploy_play = _read("ansible/deploy-rag.yaml")
+
+    assert "deployment_profile in ['onprem', 'aws', 'azure', 'gcp', 'generic']" in deploy_play
+    assert "deploy/gcp-values.yaml" in deploy_play
+    assert "gcp_workload_identity_service_account" in deploy_play
+    assert "gcp-runtime-values.yaml.j2" in deploy_play
+    gcp_runtime_values = _read("ansible/templates/gcp-runtime-values.yaml.j2")
+    assert "iam.gke.io/gcp-service-account" in gcp_runtime_values
+    assert "AUDIT_BUCKET" in gcp_runtime_values
+    assert "Upgrade the application using Helm" in deploy_play
+    assert "istio-proxy" in deploy_play
+    assert "spiffe-workload-api" in deploy_play
