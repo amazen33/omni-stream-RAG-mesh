@@ -5,6 +5,34 @@ implemented omni-stream-RAG-mesh reference platform. It is an architecture
 definition and transition guide, not a claim that every enterprise control is
 already provisioned. Optional integrations are called out explicitly.
 
+## How to apply ADM in this project
+
+Use this document as the architecture-governance plan for a change, not as a
+static diagram catalogue. The C4 model supplies the implementation views used
+in Phases C and D; the API guide supplies the client contract. A change is not
+ready for merge until its scope, contracts, security controls, and operational
+evidence have been considered in the relevant ADM row.
+
+| ADM phase | Project activity and primary evidence | Exit decision |
+| --- | --- | --- |
+| Preliminary | Establish data classification, architecture owners, repository/CI controls, approved trust domains, and environment guardrails. | Named owner and approved principles before a new capability begins. |
+| A — Vision | Describe the business outcome, stakeholders, scope, measurable value, and assumptions. | Sponsor accepts scope and explicitly records exclusions. |
+| B — Business | Map actor journeys, compliance review, telemetry, payment, and delivery value streams. | Business owner accepts data use and operating responsibilities. |
+| C — Information systems | Update API/event contracts and the C4 application/data views; define retention, provenance, and consumer compatibility. | Contract and data owners accept backward-compatibility and migration impact. |
+| D — Technology | Update Kubernetes, mesh, storage, WAF, identity, observability, and recovery design. | Platform/security review approves the target profile and evidence plan. |
+| E/F — Opportunities and migration | Slice the target state into reversible increments with dependencies, cost/risk, implementation owner, and rollout/rollback plan. | Release plan has sequencing and readiness criteria. |
+| G — Implementation governance | Use pull-request review, pytest, OpenAPI/C4/TOGAF updates, image/IaC scanning, and protected deployment approval. | Evidence satisfies the agreed architecture contract. |
+| H — Change management | Record runtime lessons, incidents, capacity/data-model changes, and whether the baseline/roadmap needs revision. | Architecture backlog or new ADM cycle is created. |
+
+For every material change, start with the affected row, update the linked
+repository artifacts, run the required checks, and attach deployment/restore
+evidence from the actual target environment. Diagrams and manifests are design
+evidence; they do not replace a live security, compliance, or resilience test.
+
+Related implementation views: [API and contributor guide](API_AND_CONTRIBUTOR_GUIDE.md),
+[C4 model](c4-model/C4_MODEL.md), and
+[architecture and operations guide](ARCHITECTURE_AND_OPERATIONS.md).
+
 ## Phase A — Architecture vision
 
 ### Business drivers
@@ -13,7 +41,7 @@ already provisioned. Optional integrations are called out explicitly.
 - Redact/tokenize sensitive data before vector embedding or model inference.
 - Correlate transaction and IoT telemetry streams with low operational latency.
 - Preserve deployment portability across local Docker, kubeadm Kubernetes,
-  managed AWS/Azure Kubernetes, and the legacy K3s edge/lab profile using
+  managed AWS/Azure/GKE Kubernetes, and the legacy K3s edge/lab profile using
   environment-driven adapters and S3-compatible storage.
 - Provide auditable delivery gates and repeatable infrastructure provisioning.
 
@@ -148,7 +176,7 @@ adapters.
 
 ### Data architecture
 
-- **MinIO/S3:** immutable JSON audit objects and Spark Parquet output.
+- **MinIO/S3/Azure Blob/GCS:** immutable JSON audit objects and Spark Parquet output.
 - **ChromaDB:** optional vector collection populated with sanitized chunks and
   Ollama embeddings.
 - **OpenSearch:** current Compose search adapter for text retrieval.
@@ -184,7 +212,7 @@ flowchart TB
     Ingest --> Events[Kafka domain events]
     AI --> Vector[ChromaDB vectors + Ollama embeddings]
     AI --> Search[OpenSearch / optional Elasticsearch]
-    Gov --> Audit[MinIO/S3 object-locked audit JSON]
+    Gov --> Audit[MinIO/S3/Azure Blob/GCS immutable audit JSON]
     Events --> Stream[Spark Structured Streaming]
     Stream --> Parquet[MinIO/S3 Parquet]
 ```
@@ -226,7 +254,7 @@ The technology baseline is container-first and platform-agnostic:
   multiple brokers and replication.
 - Spark is the implemented streaming engine; `streaming/flink-job.yaml` is an
   additional Flink deployment extension point.
-- Terraform provides small AWS/Azure provider starting points.
+- Terraform provides small AWS/Azure/GCP provider starting points.
 - Ansible prepares hybrid hosts and optional NVIDIA tooling.
 - ArgoCD and Argo Rollouts provide GitOps/progressive-delivery scaffolding.
 - Jenkins gates image and IaC changes with Trivy HIGH/CRITICAL scans.
@@ -255,7 +283,7 @@ k8s --> trust
 ```mermaid
 flowchart LR
     CI[Jenkins + Trivy gates] --> Registry[Container registry]
-    Terraform[Terraform AWS/Azure] --> Runtime[kubeadm/managed Kubernetes]
+    Terraform[Terraform AWS/Azure/GCP] --> Runtime[kubeadm/managed Kubernetes]
     Ansible[Ansible host provisioning] --> Runtime
     Argo[ArgoCD / Rollouts] --> Runtime
     Runtime --> Kafka[Kafka KRaft]
@@ -269,7 +297,7 @@ flowchart LR
 title Phase D - Technology architecture
 component "Jenkins + Trivy" as ci
 cloud "Container registry" as registry
-component "Terraform AWS/Azure" as terraform
+component "Terraform AWS/Azure/GCP" as terraform
 component "Ansible" as ansible
 component "ArgoCD / Rollouts" as argo
 node "kubeadm / managed Kubernetes" as k8s
@@ -423,21 +451,24 @@ tests, image security, and IaC security before GitOps synchronization.
 
 ### Implemented target-state controls
 
-The application now carries an immutable correlation/causation contract across
-HTTP, JSON payloads, and Kafka headers. Each request has a W3C `traceparent`;
-the core propagates that context without making an OpenTelemetry library a
-runtime prerequisite. The API is a CQRS command boundary: it writes
-object-locked audit facts and publishes `StateTransitionLogged` plus
-compensating events, while consumers may construct their own read models from
-Kafka, EventStoreDB, and TimescaleDB.
+The application now carries an immutable **server-issued**
+correlation/causation contract across HTTP responses, JSON payloads, and Kafka
+headers. It discards caller tracing headers and creates a W3C `traceparent` per
+request; the core propagates that context without making an OpenTelemetry
+library a runtime prerequisite. The API is a CQRS command boundary: it writes
+object-locked audit facts containing only HMAC tokens, correlation IDs, and
+operational metadata, and publishes `StateTransitionLogged` plus compensating
+events. Consumers may construct their own read models from Kafka, EventStoreDB,
+and TimescaleDB.
 
 | Architecture building block | Repository implementation | Operational prerequisite |
 | --- | --- | --- |
 | Boundary resilience | Named bulkhead, token-bucket, timeout, and Prometheus boundary metrics | Calibrated limits/SLO alerts per dependency |
-| Immutable audit | S3/MinIO Object Lock COMPLIANCE writes, seven-year retention, transition/compensation prefixes | Object-lock bucket created before first write and retention reviewed |
+| Privacy-preserving retrieval | Canonicalized 128-bit HMAC tokens for recognised PII; source and payment identifiers tokenized before metadata/events; audit boundary guard | Per-environment secret-manager HMAC key, key-rotation/re-index plan, DLP/classification and access controls |
+| Immutable audit | S3/MinIO Object Lock, Azure Blob locked immutability, or GCS Bucket Lock writes; governed retention and transition/compensation prefixes | Bucket/container created and locked before first write; retention reviewed |
 | Event/read stores | EventStoreDB and TimescaleDB StatefulSets; MirrorMaker 2 manifest | TLS, credentials, HA sizing, projection ownership, restore drill |
 | LGTM | Prometheus scrape targets plus Tempo/Loki/Grafana and OTel Collector definitions | Dashboard/alert ownership and configured Tempo endpoint |
-| Zero trust | Automated SPIRE hardened stack/CSI/Controller Manager, sidecar-mode STRICT Istio PeerAuthentication, selected `rag-api` SPIFFE ID, Traefik/Coraza gateway route, and corrected DNS/ingress policy | Approved per-environment trust domain/CA subject/JWT issuer, storage class, cloud WAF route, and live mTLS/SVID evidence |
+| Zero trust | Automated SPIRE hardened stack/CSI/Controller Manager, readiness check for the projected SVID, sidecar-mode STRICT Istio PeerAuthentication, selected `rag-api` SPIFFE ID, and private gateway route | Approved per-environment trust domain/CA subject/JWT issuer, storage class, cloud WAF route, and live mTLS/SVID evidence |
 | DR | Velero BackupStorageLocation and daily PVC snapshot schedule | S3 plugin/credentials, snapshot class, quarterly isolated restore evidence |
 
 ### Migration controls
@@ -446,14 +477,21 @@ Kafka, EventStoreDB, and TimescaleDB.
    in development; production cutover requires a verified object-lock bucket.
 2. Deploy EventStoreDB/TimescaleDB as isolated stateful services and introduce
    consumers/projectors under a reviewed ownership model. Do not represent the
-   empty service as an active source of truth.
-3. For prepared K3s, EKS, AKS, or generic Kubernetes, run the provider-neutral
-   `ansible/configure-mesh.yaml` (the K3s lab play remains node-specific).
+   empty service as an active source of truth. The current application uses
+   bounded compensation and vector-store cleanup, not durable event-sourcing
+   rollback; add transactional outbox, idempotent projectors, replay approval,
+   and restore evidence before making that claim.
+3. For prepared EKS, AKS, GKE, on-prem, or generic Kubernetes, run the provider-neutral
+   `ansible/configure-mesh.yaml`, then `ansible/deploy-rag.yaml` (the K3s lab
+   play remains node-specific).
    It installs SPIRE CRDs, the hardened server/agent/Controller Manager/CSI
    stack, Istio, and the gateway before rendering the selected
    `ClusterSPIFFEID` and STRICT policy. Supply the target trust domain, cluster
    name, CA subject, JWT issuer, StorageClass, and edge host, then verify the
    SVID CSI volume, sidecar, labels, service account, and plaintext rejection.
+   For GKE, `terraform/gcp` must first create the irreversible GCS Bucket Lock
+   policy; the Helm deployment also requires approved Workload Identity and
+   GCS project/bucket values.
 4. Create a Velero backup, restore into an isolated namespace, and reconcile
    MirrorMaker 2 before declaring the multi-cluster recovery path operational.
 
