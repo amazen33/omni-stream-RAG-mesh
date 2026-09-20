@@ -38,6 +38,7 @@ mesh:
     enabled: false
     csiDriver: csi.spiffe.io
     mountPath: /run/spiffe/workload
+    socketFile: agent.sock
 
 diagnosticVerifier:
   suspend: true
@@ -76,6 +77,13 @@ networkPolicy:
     istiodNamespace: istio-system
     istiodPort: 15012
     dnsNamespace: kube-system
+    # Kubernetes NetworkPolicy has no FQDN primitive. Cloud overlays use this
+    # only for HTTPS endpoints; production targets should replace 0.0.0.0/0
+    # with approved egress-gateway or provider-private endpoint CIDRs.
+    externalCIDRs: []
+    externalPorts: [443]
+    metadataCIDRs: []
+    metadataPorts: [80]
 # Legacy integration examples are not rendered without explicit opt-in.
 integrations:
   kafka: false
