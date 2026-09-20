@@ -60,14 +60,9 @@
     argv: "{{ kube_cli_argv + ['-n', istio_ingress_namespace, 'rollout', 'status', 'deployment/istio-ingress', '--timeout=600s'] }}"
   changed_when: false
 
-- name: Wait for SPIRE server StatefulSet in its chart namespace
+- name: Wait for SPIRE server StatefulSet, including its controller-manager sidecar
   ansible.builtin.command:
     argv: "{{ kube_cli_argv + ['-n', spire_server_namespace, 'rollout', 'status', 'statefulset/spire-server', '--timeout=600s'] }}"
-  changed_when: false
-
-- name: Wait for SPIRE controller manager in its chart namespace
-  ansible.builtin.command:
-    argv: "{{ kube_cli_argv + ['-n', spire_controller_manager_namespace, 'rollout', 'status', 'deployment/spire-controller-manager', '--timeout=600s'] }}"
   changed_when: false
 
 - name: Wait for SPIRE agent daemonset
