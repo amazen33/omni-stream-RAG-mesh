@@ -96,9 +96,11 @@ variables, so health checks remain usable during dependency outages.
 ## Infrastructure and recovery
 
 The Kubernetes deployment labels `rag-api` consistently for Istio/SPIRE and
-mounts its SPIFFE SVID using the CSI driver; its scoped default-deny
+mounts the SPIFFE Workload API socket directory using the CSI driver; readiness
+opens that local socket and never reads certificate/key files. Its scoped default-deny
 NetworkPolicies permit only the Istio gateway, Prometheus metrics, required
-workload dependencies, Istio control plane, and DNS. The
+workload dependencies, Istio control plane, and DNS; cloud overlays additionally
+allow their storage and workload-identity endpoints. The
 provider-neutral mesh task installs SPIRE (CRDs, server, agent, controller
 manager, CSI driver) and Istio before rendering the workload registration and
 STRICT mTLS policy. The primary on-prem target is upstream Kubernetes installed
