@@ -22,4 +22,4 @@ primary kubeadm/containerd/Calico target. Use `ansible/provision.yaml` only for
 the legacy K3s lab. For EKS, AKS, bare-metal, or other prepared Kubernetes
 clusters, run the provider-neutral mesh play from a bastion/CI runner with the
 target kubeconfig. Application delivery remains Helm/GitOps. See
-[platform profiles](../docs/platform-profiles.md).
+[architecture and operations guide](../docs/ARCHITECTURE_AND_OPERATIONS.md).
