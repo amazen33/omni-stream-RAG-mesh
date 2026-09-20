@@ -10,3 +10,9 @@ config:
   AUDIT_BACKEND: azure_blob
 auditInit:
   enabled: false
+networkPolicy:
+  egress:
+    # Blob Storage and Microsoft Entra Workload Identity token exchange.
+    # Substitute target-approved Azure Firewall/private-endpoint CIDRs.
+    externalCIDRs: [0.0.0.0/0]
+    externalPorts: [443]
