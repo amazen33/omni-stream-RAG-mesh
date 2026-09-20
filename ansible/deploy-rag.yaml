@@ -1,0 +1,126 @@
+---
+# Helm-only application delivery for prepared on-prem and managed clusters.
+# Run configure-mesh.yaml first; this play never bootstraps nodes or falls back
+# to K3s commands. Supply an immutable image tag and a protected kubeconfig.
+- name: Deploy rag-api through the portable Helm chart
+  hosts: mesh_controller:master
+  become: true
+  any_errors_fatal: true
+  gather_facts: false
+  vars_files: [mesh-vars.yaml]
+  vars:
+    kube_cli_argv: [kubectl]
+    kubeconfig: ""
+    deployment_values_file: "deploy/{{ deployment_profile }}-values.yaml"
+    gcp_project_id: ""
+    gcp_audit_bucket: ""
+    gcp_workload_identity_service_account: ""
+    gcp_runtime_values_file: "{{ rag_remote_dir }}/deploy/gcp-runtime-values.yaml"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  tasks:
+    - name: Require deployment inputs and a prepared SPIFFE target
+      ansible.builtin.assert:
+        that:
+          - kubeconfig | length > 0
+          - kube_cli_argv == ['kubectl']
+          - deployment_profile in ['onprem', 'aws', 'azure', 'gcp', 'generic']
+          - rag_image | length > 0
+          - rag_image_tag | length > 0
+          - deployment_values_file | length > 0
+          - deployment_values_file in ['deploy/generic-values.yaml', 'deploy/onprem-values.yaml', 'deploy/aws-values.yaml', 'deploy/azure-values.yaml', 'deploy/gcp-values.yaml']
+          - deployment_profile != 'gcp' or gcp_project_id is match('^[a-z][a-z0-9-]{4,28}[a-z0-9]$')
+          - deployment_profile != 'gcp' or gcp_audit_bucket is match('^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$')
+          - deployment_profile != 'gcp' or gcp_workload_identity_service_account is match('^[^@\\s]+@[^@\\s]+\\.iam\\.gserviceaccount\\.com$')
+        fail_msg: Supply a standard kubeconfig, a supported profile, immutable image repository/tag, and a reviewed values file.
+
+    - name: Verify the SPIFFE CSI driver before enabling the workload mount
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['get', 'csidriver', 'csi.spiffe.io'] }}"
+      changed_when: false
+
+    - name: Create the application namespace with Istio injection enabled
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['create', 'namespace', rag_namespace] }}"
+      register: rag_namespace_create
+      changed_when: "'created' in rag_namespace_create.stdout"
+      failed_when: rag_namespace_create.rc != 0 and 'AlreadyExists' not in rag_namespace_create.stderr
+
+    - name: Enable Istio injection before Helm creates pods
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['label', 'namespace', rag_namespace, 'istio-injection=enabled', '--overwrite'] }}"
+      changed_when: false
+
+    - name: Require externally managed runtime secrets
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'get', 'secret', 'rag-secrets', '-o', 'json'] }}"
+      register: rag_secrets
+      changed_when: false
+      no_log: true
+
+    - name: Verify the PII tokenization secret exists without printing it
+      ansible.builtin.assert:
+        that:
+          - "'PII_TOKEN_SALT' in ((rag_secrets.stdout | from_json)['data'] | default({}))"
+        fail_msg: rag-secrets must contain PII_TOKEN_SALT from the target secret manager before production-profile Helm deployment.
+      no_log: true
+
+    - name: Create the controller deployment workspace
+      ansible.builtin.file:
+        path: "{{ rag_remote_dir }}/deploy"
+        state: directory
+        mode: '0755'
+
+    - name: Copy the Helm chart to the controller
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../rag-chart"
+        dest: "{{ rag_remote_dir }}/"
+        mode: preserve
+
+    - name: Copy the selected non-secret values to the controller
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ deployment_values_file }}"
+        dest: "{{ rag_remote_dir }}/{{ deployment_values_file }}"
+        mode: '0644'
+
+    - name: Render the reviewed GKE Workload Identity and GCS runtime values
+      ansible.builtin.template:
+        src: gcp-runtime-values.yaml.j2
+        dest: "{{ gcp_runtime_values_file }}"
+        mode: '0600'
+      when: deployment_profile == 'gcp'
+
+    - name: Lint the exact Helm inputs that will be installed
+      ansible.builtin.command:
+        argv: "{{ ['helm', 'lint', rag_remote_dir ~ '/rag-chart', '-f', rag_remote_dir ~ '/' ~ deployment_values_file] + (['-f', gcp_runtime_values_file] if deployment_profile == 'gcp' else []) + ['--set', 'ragApi.image.repository=' ~ rag_image ~ ',ragApi.image.tag=' ~ rag_image_tag] }}"
+      changed_when: false
+
+    - name: Upgrade the application using Helm as the single deployment source
+      ansible.builtin.command:
+        argv: "{{ ['helm', 'upgrade', '--install', 'rag', rag_remote_dir ~ '/rag-chart', '--namespace', rag_namespace, '-f', rag_remote_dir ~ '/' ~ deployment_values_file] + (['-f', gcp_runtime_values_file] if deployment_profile == 'gcp' else []) + ['--set', 'ragApi.image.repository=' ~ rag_image ~ ',ragApi.image.tag=' ~ rag_image_tag, '--wait', '--timeout', '10m'] }}"
+
+    - name: Wait for rag-api rollout
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'rollout', 'status', 'deployment/rag-api', '--timeout=600s'] }}"
+      changed_when: false
+
+    - name: Read the deployed pod contract
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'get', 'pods', '-l', 'app.kubernetes.io/name=rag-api', '-o', 'json'] }}"
+      register: rag_api_pods
+      changed_when: false
+
+    - name: Assert Istio injection and the SPIFFE CSI mount are active
+      ansible.builtin.assert:
+        that:
+          - (rag_api_pods.stdout | from_json)['items'] | length > 0
+          - "'istio-proxy' in ((rag_api_pods.stdout | from_json)['items'][0].spec.containers | map(attribute='name') | list)"
+          - "'spiffe-workload-api' in ((rag_api_pods.stdout | from_json)['items'][0].spec.volumes | map(attribute='name') | list)"
+        fail_msg: Refusing traffic because rag-api did not receive its Istio proxy and projected SPIFFE SVID volume.
+
+    - name: Verify readiness through the cluster service proxy
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['get', '--raw', '/api/v1/namespaces/' ~ rag_namespace ~ '/services/rag-api:8000/proxy/health/ready'] }}"
+      register: readiness
+      changed_when: false
+      failed_when: readiness.rc != 0 or (readiness.stdout | from_json).status != 'ok'
