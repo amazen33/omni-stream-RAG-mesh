@@ -15,3 +15,13 @@ config:
   AUDIT_BACKEND: gcs
 auditInit:
   enabled: false
+networkPolicy:
+  egress:
+    # GCS/Google STS HTTPS traffic. Use Private Google Access or an Istio
+    # egress gateway CIDR allow-list where available.
+    externalCIDRs: [0.0.0.0/0]
+    externalPorts: [443]
+    # GKE Workload Identity metadata server paths: standard NetworkPolicy and
+    # Dataplane V2 respectively.
+    metadataCIDRs: [169.254.169.252/32, 169.254.169.254/32]
+    metadataPorts: [80, 8080, 987, 988]
