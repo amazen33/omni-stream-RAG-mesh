@@ -20,7 +20,16 @@ spec:
   hosts: ["{{ mesh_ingress_host }}"]
   gateways: [rag-api-edge]
   http:
-    - route:
+    # Only public application and health endpoints traverse the edge. Internal
+    # diagnostics and any future administrative paths stay off this route.
+    - match:
+        - uri: {exact: /ask}
+        - uri: {exact: /ingest-sample}
+        - uri: {exact: /payments/transactions}
+        - uri: {prefix: /health/}
+        - uri: {exact: /healthz}
+        - uri: {exact: /readyz}
+      route:
         - destination:
             host: rag-api.rag.svc.cluster.local
             port: {number: 8000}
@@ -37,6 +46,12 @@ spec:
   rules:
     - from:
         - source: {namespaces: ["{{ istio_ingress_namespace }}"]}
+    # Prometheus reaches Envoy's merged metrics port through the same strict
+    # mTLS policy; it is not exposed at the edge gateway.
+    - from:
+        - source: {namespaces: ["{{ monitoring_namespace }}"]}
+      to:
+        - operation: {ports: ["15020"], paths: ["/stats/prometheus"]}
 ---
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterSPIFFEID
