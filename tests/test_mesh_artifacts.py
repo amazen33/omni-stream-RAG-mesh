@@ -55,7 +55,25 @@ def test_rag_workload_uses_the_spiffe_csi_volume_when_mesh_enabled() -> None:
     assert "spiffe-workload-api" in deployment
     assert "enabled: false" in values
     assert "REQUIRE_SPIFFE_SVID" in deployment
+    assert "SPIFFE_ENDPOINT_SOCKET" in deployment
+    assert "socketFile: agent.sock" in values
+    assert "annotations:\n        sidecar.istio.io/inject" not in deployment
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}" in deployment
+
+
+def test_cloud_network_policies_allow_required_identity_and_storage_egress() -> None:
+    policy = _read("rag-chart/templates/network-policy.yaml")
+    gcp = yaml.safe_load(_read("deploy/gcp-values.yaml"))
+    for profile in ("aws", "azure", "gcp"):
+        values = yaml.safe_load(_read(f"deploy/{profile}-values.yaml"))
+        assert values["networkPolicy"]["egress"]["externalCIDRs"] == ["0.0.0.0/0"]
+        assert values["networkPolicy"]["egress"]["externalPorts"] == [443]
+    assert set(gcp["networkPolicy"]["egress"]["metadataCIDRs"]) == {
+        "169.254.169.252/32", "169.254.169.254/32"
+    }
+    assert "externalCIDRs" in policy
+    assert "metadataCIDRs" in policy
+    assert ".Values.auditInit.hook" in _read("rag-chart/templates/audit-init.yaml")
 
 
 def test_edge_waf_routes_to_istio_not_directly_to_the_workload() -> None:
@@ -98,3 +116,5 @@ def test_portable_deployment_play_uses_helm_and_asserts_mesh_injection() -> None
     assert "Upgrade the application using Helm" in deploy_play
     assert "istio-proxy" in deploy_play
     assert "spiffe-workload-api" in deploy_play
+    assert "exec', 'deployment/rag-api'" in deploy_play
+    assert "service proxy" not in deploy_play
