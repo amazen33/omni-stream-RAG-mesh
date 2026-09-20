@@ -26,7 +26,9 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: rag-api
-      automountServiceAccountToken: false
+      # Required by cloud workload identity overlays (IRSA / GKE Workload
+      # Identity); the baseline remains false and supplies no API token.
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -51,6 +53,16 @@ spec:
                 name: rag-secrets
                 optional: true
           env:
+            - name: RUNTIME_PROFILE
+              value: production
+            {{- if and .Values.mesh.enabled .Values.mesh.spiffe.enabled }}
+            # Readiness consumes the CSI-projected SVID locally; it never
+            # copies or emits the private key.
+            - name: REQUIRE_SPIFFE_SVID
+              value: "true"
+            - name: SPIFFE_SVID_PATH
+              value: {{ .Values.mesh.spiffe.mountPath | quote }}
+            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -91,6 +103,7 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
