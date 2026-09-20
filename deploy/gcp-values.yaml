@@ -1,0 +1,17 @@
+# GKE overlay. Configure Workload Identity for rag-api and inject only the
+# non-secret GCS bucket/project settings here or through a reviewed values
+# file. terraform/gcp creates and Bucket-Locks the audit bucket before deploy.
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+serviceAccount:
+  # GKE Workload Identity needs the projected service-account token. Set the
+  # iam.gke.io/gcp-service-account annotation only in approved target values.
+  automountServiceAccountToken: true
+  annotations: {}
+config:
+  ENABLE_AUDIT_STORE: "true"
+  AUDIT_BACKEND: gcs
+auditInit:
+  enabled: false
