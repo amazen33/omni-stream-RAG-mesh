@@ -1,12 +1,11 @@
-# Prerequisites: Velero plus its AWS/S3 plugin and a CSI or cloud snapshot
-# provider. The credentials Secret and bucket are supplied outside this repo.
+# On-prem/S3 profile. Prerequisites: Velero plus its AWS/S3 plugin and a CSI or
+# cloud snapshot provider. The credentials Secret and bucket are supplied
+# outside this repo. Choose the Azure example instead for an AKS target.
 apiVersion: velero.io/v1
 kind: BackupStorageLocation
 metadata:
   name: rag-minio
   namespace: velero
-  annotations:
-    backup.velero.io/server-side-encryption: AES256
 spec:
   provider: aws
   objectStorage:
@@ -16,6 +15,8 @@ spec:
     region: us-east-1
     s3ForcePathStyle: "true"
     s3Url: http://minio.rag.svc:9000
+    # This is a Velero AWS-plugin setting, unlike the former inert annotation.
+    serverSideEncryption: AES256
   credential:
     name: velero-minio-credentials
     key: cloud
