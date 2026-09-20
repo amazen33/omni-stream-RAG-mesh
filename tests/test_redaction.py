@@ -11,6 +11,13 @@ def test_redacts_common_pii_deterministically():
 
 def test_card_detection_requires_luhn_and_tokens_are_keyed() -> None:
     output, counts = redact("reference 4111 1111 1111 1112", "salt")
-    assert output.endswith("4111 1111 1111 1112")
-    assert counts == {}
+    assert "4111 1111 1111 1112" not in output
+    assert counts == {"numeric_identifier": 1}
     assert token_for("email", "a@example.com", "key-a") != token_for("email", "a@example.com", "key-b")
+
+
+def test_does_not_misclassify_iso_timestamps_as_phone_numbers() -> None:
+    timestamp = "2024-01-15 10:30"
+    output, counts = redact(f"created {timestamp}", "salt")
+    assert timestamp in output
+    assert counts == {}
