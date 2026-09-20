@@ -34,7 +34,7 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: python -m pip check
       - name: Verify optional adapter imports
-        run: python -c "import kafka, chromadb, langchain_ollama, opensearchpy, elasticsearch"
+        run: python -c "import kafka, chromadb, langchain_ollama, opensearchpy, elasticsearch, azure.storage.blob, google.cloud.storage"
       - run: python -m pytest -q --junitxml=test-results/pytest.xml
       - name: Verify downstream failure lifecycle
         run: python -m pytest -v tests/chaos/test_lifecycle_downstream_failure.py
@@ -60,17 +60,37 @@ jobs:
         with:
           terraform_version: 1.11.4
       - run: python -m pip install -r ansible/requirements-controller.txt
-      - name: Validate Ansible and render lab charts
+      - name: Lint Ansible and YAML
+        run: |
+          # Start with the portable minimum profile; stricter policy rules are
+          # incrementally enabled as the legacy lab play is refactored.
+          ansible-lint --offline --profile=min playbook.yaml ansible
+          # Helm templates are rendered and schema-checked below; lint the
+          # controller/CI YAML as YAML rather than treating Go templates as it.
+          yamllint -c .yamllint playbook.yaml ansible deploy/*.yaml .github/workflows
+      - name: Validate Ansible and render Helm charts
         run: |
           ansible-playbook -i inventory.ini playbook.yaml --syntax-check
           ansible-playbook -i inventory.ini ansible/configure-mesh.yaml --syntax-check
+          ansible-playbook -i inventory.ini ansible/deploy-rag.yaml --syntax-check
           helm lint deploy/lab-infra
           helm lint rag-chart -f deploy/lab-values.yaml
+          helm lint rag-chart -f deploy/gcp-values.yaml --set ragApi.image.tag=validation-image
           mkdir -p test-results
           helm template rag-infra deploy/lab-infra -n rag > test-results/infrastructure.yaml
           helm template rag rag-chart -n rag -f deploy/lab-values.yaml > test-results/application.yaml
           helm template strimzi strimzi-kafka-operator --repo https://strimzi.io/charts/ --version 0.51.0 --include-crds > test-results/strimzi-crds.yaml
           python -m ops.validate_kafka_manifests test-results/infrastructure.yaml test-results/strimzi-crds.yaml
+      - name: Validate the rendered kubeadm configuration with kubeadm dry-run
+        run: |
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+          sudo apt-get update
+          sudo apt-get install -y kubeadm
+          ansible localhost -c local -m ansible.builtin.template \
+            -a 'src=ansible/templates/kubeadm-init.yaml.j2 dest=test-results/kubeadm-init.yaml mode=0600' \
+            -e 'ansible_host=127.0.0.1 kubernetes_control_plane_endpoint=127.0.0.1:6443 kubernetes_pod_subnet=10.244.0.0/16 kubernetes_service_subnet=10.96.0.0/12 kubernetes_control_plane_host=127.0.0.1'
+          sudo kubeadm init --dry-run --config test-results/kubeadm-init.yaml --ignore-preflight-errors=all
       - name: Format and validate Terraform starters
         run: |
           terraform -chdir=terraform/aws fmt -check
@@ -79,6 +99,9 @@ jobs:
           terraform -chdir=terraform/azure fmt -check
           terraform -chdir=terraform/azure init -backend=false -input=false
           terraform -chdir=terraform/azure validate
+          terraform -chdir=terraform/gcp fmt -check
+          terraform -chdir=terraform/gcp init -backend=false -input=false
+          terraform -chdir=terraform/gcp validate
       - name: Validate Kubernetes schemas
         run: |
           mkdir -p "$RUNNER_TEMP/kubeconform"
@@ -92,6 +115,11 @@ jobs:
         run: |
           "$RUNNER_TEMP/kubeconform/kubeconform" -strict -ignore-missing-schemas -summary \
             $(find k8s waf -type f \( -name '*.yaml' -o -name '*.yml' \) -print)
+      - name: Server-validate rendered Helm resources on Kind
+        uses: helm/kind-action@v1.12.0
+      - name: Apply rendered contract to the disposable Kind API server
+        run: |
+          kubectl apply --server-side --dry-run=server -f test-results/application.yaml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
