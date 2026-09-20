@@ -1,4 +1,6 @@
 import pytest
+import json
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 from contexts.ai.resilience import ResiliencePolicy
@@ -14,7 +16,7 @@ def test_payment_event_is_sanitized_and_versioned():
         "currency": "usd",
         "payment_network": "card",
     })
-    assert event.topic == "payments.transaction.ingested.v1"
+    assert event.topic == "payments.transaction.ingested.v2"
     assert event.currency == "USD"
     assert event.pii_tokenized is True
 
@@ -30,7 +32,7 @@ def test_risk_scoring_fails_safe_to_review():
         {"transaction_id": "tx-2", "merchant_id": "m-2", "amount_minor": 900000, "currency": "EUR"}
     )
     score = RiskScoringService().score(event)
-    assert score.topic == "payments.risk.scored.v1"
+    assert score.topic == "payments.risk.scored.v2"
     assert score.decision == "review"
     assert 0 <= score.risk_score <= 1
 
@@ -67,3 +69,22 @@ def test_payment_route_returns_risk_decision_without_raw_card_fields():
     # Validation may identify the rejected input field, but the endpoint never
     # invokes payment processing or persists the raw card value.
     assert not any("ignored" in str(record) for record in audit.records)
+
+
+def test_avro_payment_contracts_match_the_tokenized_v2_events() -> None:
+    root = Path(__file__).resolve().parents[1]
+    transaction_schema = json.loads(
+        (root / "infrastructure/fintech/schemas/payment_transaction_ingested.avsc").read_text(encoding="utf-8")
+    )
+    risk_schema = json.loads(
+        (root / "infrastructure/fintech/schemas/payment_risk_scored.avsc").read_text(encoding="utf-8")
+    )
+    event = PaymentIngestionService().ingest(
+        {"transaction_id": "tx-schema", "merchant_id": "merchant-schema", "amount_minor": 1, "currency": "USD"}
+    )
+    score = RiskScoringService().score(event)
+
+    assert transaction_schema["namespace"] == "omni.payments.v2"
+    assert [field["name"] for field in transaction_schema["fields"]] == list(event.to_dict())
+    assert risk_schema["namespace"] == "omni.payments.v2"
+    assert [field["name"] for field in risk_schema["fields"]] == list(score.to_dict())
