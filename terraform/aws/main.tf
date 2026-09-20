@@ -67,8 +67,61 @@ variable "opensearch_security_group_ids" {
   }
 }
 
+variable "opensearch_authorized_principal_arns" {
+  type        = list(string)
+  description = "IRSA/workload role ARNs permitted to use the private OpenSearch HTTP endpoint."
+
+  validation {
+    condition     = length(var.opensearch_authorized_principal_arns) > 0
+    error_message = "Provide one or more least-privilege workload principal ARNs for OpenSearch access."
+  }
+}
+
+variable "audit_retention_days" {
+  type        = number
+  default     = 2555
+  description = "Object Lock compliance retention. Amend only through approved records governance."
+
+  validation {
+    condition     = var.audit_retention_days >= 1
+    error_message = "audit_retention_days must be at least one day."
+  }
+}
+
+variable "audit_lock_mode" {
+  type        = string
+  default     = "COMPLIANCE"
+  description = "S3 Object Lock mode. GOVERNANCE requires an approved non-production exception."
+
+  validation {
+    condition     = contains(["COMPLIANCE", "GOVERNANCE"], var.audit_lock_mode)
+    error_message = "audit_lock_mode must be COMPLIANCE or GOVERNANCE."
+  }
+}
+
 provider "aws" {
   region = var.region
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "opensearch_access" {
+  statement {
+    sid = "AllowOnlyApprovedWorkloadRoles"
+    actions = [
+      "es:ESHttpGet",
+      "es:ESHttpHead",
+      "es:ESHttpPost",
+      "es:ESHttpPut",
+      "es:ESHttpDelete",
+    ]
+    resources = ["arn:aws:es:${var.region}:${data.aws_caller_identity.current.account_id}:domain/${var.name}/*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = var.opensearch_authorized_principal_arns
+    }
+  }
 }
 
 resource "aws_s3_bucket" "audit" {
@@ -98,8 +151,8 @@ resource "aws_s3_bucket_object_lock_configuration" "audit" {
 
   rule {
     default_retention {
-      mode  = "COMPLIANCE"
-      years = 7
+      mode  = var.audit_lock_mode
+      days  = var.audit_retention_days
     }
   }
 }
@@ -140,6 +193,8 @@ resource "aws_opensearch_domain" "search" {
     enforce_https = true
   }
 
+  access_policies = data.aws_iam_policy_document.opensearch_access.json
+
   vpc_options {
     subnet_ids         = var.opensearch_subnet_ids
     security_group_ids = var.opensearch_security_group_ids
@@ -153,5 +208,9 @@ output "mesh_deployment_contract" {
     spire_cluster_name = var.spire_cluster_name
     mesh_ingress_host  = var.mesh_ingress_host
     edge_waf           = "AWS WAF or equivalent must forward only to the private Istio gateway"
+    audit_backend      = "s3"
+    audit_retention_days = var.audit_retention_days
+    audit_lock_mode    = var.audit_lock_mode
+    search_auth_mode   = "aws_sigv4"
   }
 }
