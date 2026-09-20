@@ -84,16 +84,23 @@
         regexp: '^(?!#)(.*\s+swap\s+.*)$'
         replace: '# \1'
 
-    - name: Generate the containerd configuration
+    - name: Inspect the managed containerd configuration
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config
+
+    - name: Generate the containerd configuration only when no managed file exists
       ansible.builtin.command: containerd config default
       register: containerd_default_config
       changed_when: false
+      when: not containerd_config.stat.exists
 
-    - name: Write containerd configuration
+    - name: Write the initial containerd configuration without replacing operator changes
       ansible.builtin.copy:
         dest: /etc/containerd/config.toml
         content: "{{ containerd_default_config.stdout }}\n"
         mode: '0644'
+      when: not containerd_config.stat.exists
 
     - name: Enable systemd cgroups for kubelet and containerd
       ansible.builtin.replace:
@@ -249,12 +256,14 @@
         argv: [kubectl, get, tigerastatus, calico, -o, json]
       register: calico_status
       until: >-
-        (calico_status.stdout | from_json)['status']['conditions'] |
+        calico_status.rc == 0 and
+        ((calico_status.stdout | default('{}', true) | from_json).get('status', {}).get('conditions', [])) |
         selectattr('type', 'equalto', 'Available') |
         selectattr('status', 'equalto', 'True') | list | length > 0
       retries: 60
       delay: 10
       changed_when: false
+      failed_when: false
 
     - name: Wait for Calico networking after the operator creates calico-node
       ansible.builtin.command:
@@ -265,6 +274,19 @@
       ansible.builtin.command:
         argv: [kubectl, -n, kube-system, rollout, status, deployment/coredns, --timeout=600s]
       changed_when: false
+
+    - name: Install the optional pinned local-path StorageClass for on-prem clusters
+      ansible.builtin.command:
+        argv: [kubectl, apply, -f, "{{ local_path_provisioner_manifest_url }}"]
+      register: local_path_provisioner
+      changed_when: "'created' in local_path_provisioner.stdout or 'configured' in local_path_provisioner.stdout"
+      when: install_local_path_provisioner | bool
+
+    - name: Verify the optional local-path StorageClass
+      ansible.builtin.command:
+        argv: [kubectl, get, storageclass, "{{ local_path_storage_class }}"]
+      changed_when: false
+      when: install_local_path_provisioner | bool
 
     - name: Create a short-lived worker join command
       ansible.builtin.command: kubeadm token create --ttl 30m --print-join-command
