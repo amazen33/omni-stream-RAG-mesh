@@ -24,5 +24,6 @@ def test_bootstrap_and_mesh_versions_are_explicitly_pinned() -> None:
 
     assert "kubernetes_minor: v1.35" in variables
     assert "calico_version: v3.32.2" in variables
+    assert "local_path_provisioner_version: v0.0.36" in variables
     for version in ('version: "1.31.0"', 'version: "0.5.0"', 'version: "0.30.0"'):
         assert version in mesh
