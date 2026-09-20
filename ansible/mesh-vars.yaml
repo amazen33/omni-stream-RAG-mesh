@@ -1,0 +1,145 @@
+---
+# Provider-neutral mesh, operator, and deployment defaults. This file contains
+# no K3s client, kubeconfig, or lab-only storage setting.
+rag_namespace: rag
+rag_remote_dir: /opt/rag-mesh
+rag_image: ghcr.io/amazen33/omni-stream-rag-mesh
+rag_image_tag: ""
+deployment_profile: generic
+helm_version: v3.19.0
+helm_download_url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+minimum_node_memory_mb: 3500
+minimum_cluster_memory_mb: 16000
+install_cert_manager: true
+install_external_secrets: true
+install_argocd: false
+install_argo_rollouts: false
+mesh_enabled: true
+waf_enabled: false
+storage_class: ""
+mesh_gateway_service_type: ClusterIP
+mesh_gateway_load_balancer_ip: ""
+# On-premises can opt in to the pinned MetalLB controller and explicitly
+# allocated private address ranges. Cloud clusters use their native LB instead.
+metallb_enabled: false
+metallb_address_pool: []
+
+# Set these to the namespaces created by the hardened SPIRE chart. Keeping them
+# explicit makes readiness checks independent of the Helm release namespace.
+spire_namespace: spire-mgmt
+spire_server_namespace: spire-server
+spire_agent_namespace: spire-system
+spire_controller_manager_namespace: spire-server
+spire_csi_namespace: spire-system
+spire_trust_domain: ""
+spire_cluster_name: ""
+spire_jwt_issuer: ""
+spire_ca_country: ""
+spire_ca_organization: ""
+istio_namespace: istio-system
+istio_ingress_namespace: istio-ingress
+monitoring_namespace: monitoring
+mesh_ingress_host: ""
+
+operator_releases:
+  - name: strimzi
+    namespace: kafka
+    chart: strimzi/strimzi-kafka-operator
+    version: "0.51.0"
+    enabled: true
+    values: {watchAnyNamespace: true}
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: v1.18.2
+    enabled: "{{ install_cert_manager }}"
+    values: {crds: {enabled: true}}
+  - name: external-secrets
+    namespace: external-secrets
+    chart: external-secrets/external-secrets
+    version: "0.19.2"
+    enabled: "{{ install_external_secrets }}"
+    values: {installCRDs: true}
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: "8.3.5"
+    enabled: "{{ install_argocd }}"
+    values: {}
+  - name: argo-rollouts
+    namespace: argo-rollouts
+    chart: argo/argo-rollouts
+    version: "2.40.5"
+    enabled: "{{ install_argo_rollouts }}"
+    values: {}
+
+mesh_operator_releases:
+  - name: metallb
+    namespace: metallb-system
+    chart: metallb/metallb
+    version: "0.15.2"
+    enabled: "{{ metallb_enabled }}"
+    values: {}
+  - name: istio-base
+    namespace: "{{ istio_namespace }}"
+    chart: istio/base
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {defaultRevision: default}
+  - name: istiod
+    namespace: "{{ istio_namespace }}"
+    chart: istio/istiod
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {profile: minimal}
+  - name: istio-ingress
+    namespace: "{{ istio_ingress_namespace }}"
+    chart: istio/gateway
+    version: "1.31.0"
+    enabled: "{{ mesh_enabled }}"
+    values:
+      labels: {istio: ingressgateway}
+      service:
+        type: "{{ mesh_gateway_service_type }}"
+        loadBalancerIP: "{{ mesh_gateway_load_balancer_ip }}"
+  - name: spire-crds
+    namespace: "{{ spire_namespace }}"
+    chart: spiffe/spire-crds
+    version: "0.5.0"
+    enabled: "{{ mesh_enabled }}"
+    values: {}
+  - name: spire
+    namespace: "{{ spire_namespace }}"
+    chart: spiffe/spire
+    version: "0.30.0"
+    enabled: "{{ mesh_enabled }}"
+    values:
+      global:
+        openshift: false
+        spire:
+          recommendations: {enabled: true}
+          strictMode: true
+          namespaces: {create: true}
+          clusterName: "{{ spire_cluster_name }}"
+          trustDomain: "{{ spire_trust_domain }}"
+          jwtIssuer: "{{ spire_jwt_issuer }}"
+          caSubject:
+            country: "{{ spire_ca_country }}"
+            organization: "{{ spire_ca_organization }}"
+            commonName: "{{ spire_trust_domain }}"
+      spire-server:
+        persistence: {storageClass: "{{ storage_class }}"}
+        controllerManager:
+          enabled: true
+          identities:
+            clusterSPIFFEIDs:
+              default: {enabled: false}
+
+helm_repositories:
+  - {name: strimzi, url: "https://strimzi.io/charts/"}
+  - {name: jetstack, url: "https://charts.jetstack.io"}
+  - {name: external-secrets, url: "https://charts.external-secrets.io"}
+  - {name: argo, url: "https://argoproj.github.io/argo-helm"}
+  - {name: istio, url: "https://istio-release.storage.googleapis.com/charts"}
+  - {name: spiffe, url: "https://spiffe.github.io/helm-charts-hardened/"}
+  - {name: metallb, url: "https://metallb.github.io/metallb"}
