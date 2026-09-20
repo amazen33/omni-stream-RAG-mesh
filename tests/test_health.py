@@ -34,11 +34,34 @@ def test_schema_registry_is_part_of_readiness_when_configured(monkeypatch):
     assert service.report("ready")["checks"]["schema_registry"]["status"] == "ok"
 
 
-def test_required_spiffe_svid_is_a_readiness_dependency(monkeypatch, tmp_path):
+def test_required_spiffe_workload_api_is_a_readiness_dependency(monkeypatch):
     monkeypatch.setenv("REQUIRE_SPIFFE_SVID", "true")
-    monkeypatch.setenv("SPIFFE_SVID_PATH", str(tmp_path))
+    endpoint = "/run/spiffe/workload/agent.sock"
+    monkeypatch.setenv("SPIFFE_ENDPOINT_SOCKET", f"unix://{endpoint}")
+    connected: list[str] = []
+    available = False
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def settimeout(self, _timeout: float) -> None:
+            return None
+
+        def connect(self, path: str) -> None:
+            if not available:
+                raise OSError("socket unavailable")
+            connected.append(path)
+
+    monkeypatch.setattr("app.health.socket.AF_UNIX", 1, raising=False)
+    monkeypatch.setattr("app.health.socket.socket", lambda *_args: FakeSocket())
     service = HealthService()
     assert service.report("ready")["status"] == "failed"
-    for name in ("svid.pem", "svid.key", "svid_bundle.pem"):
-        (tmp_path / name).write_text("identity", encoding="utf-8")
-    assert service.report("ready")["status"] == "ok"
+    available = True
+    report = service.report("ready")
+    assert report["status"] == "ok"
+    assert report["checks"]["spiffe_workload_api"]["status"] == "ok"
+    assert connected == [endpoint]
