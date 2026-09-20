@@ -11,12 +11,14 @@ _EMAIL = r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"
 _PHONE = r"\+?\d[\d ()-]{7,}\d"
 _CARD = r"(?:\d[ -]?){13,19}"
 _SSN = r"\d{3}-\d{2}-\d{4}"
+_DATETIME = r"\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
 
 # One alternation gives each source character at most one chance to be
 # classified. This prevents a replacement token from being processed by a
 # later pattern and makes the precedence explicit.
 PII_PATTERN = re.compile(
-    rf"(?P<ssn>(?<!\d){_SSN}(?!\d))"
+    rf"(?P<datetime>(?<!\d){_DATETIME}(?!\d))"
+    rf"|(?P<ssn>(?<!\d){_SSN}(?!\d))"
     rf"|(?P<card>(?<!\d){_CARD}(?!\d))"
     rf"|(?P<email>\b{_EMAIL}\b)"
     rf"|(?P<phone>(?<!\w){_PHONE}(?!\w))",
@@ -157,11 +159,15 @@ def redact(text: str, salt: str = "change-me") -> Tuple[str, Dict[str, int]]:
         value = match.group(0)
         if kind is None:
             return value
-        # A 13–19 digit run is not a payment card merely because it has the
-        # right length. Retain invalid values so phone/account data is not
-        # incorrectly labeled as cardholder data.
-        if kind == "card" and not _is_luhn_valid(value):
+        # ISO-like timestamps satisfy the permissive phone punctuation rules
+        # but are operational data, not telephone numbers.
+        if kind == "datetime":
             return value
+        # A 13–19 digit run is not a payment card merely because it has the
+        # right length. Tokenize invalid numbers as generic numeric identifiers
+        # rather than leaking them or misrepresenting them as card data.
+        if kind == "card" and not _is_luhn_valid(value):
+            kind = "numeric_identifier"
         counts[kind] = counts.get(kind, 0) + 1
         return token_for(kind, value, salt)
 
