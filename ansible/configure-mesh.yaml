@@ -7,14 +7,29 @@
   become: true
   any_errors_fatal: true
   gather_facts: true
-  vars_files: [lab-vars.yaml]
+  vars_files: [mesh-vars.yaml]
   vars:
     # All primary profiles use the standard Kubernetes client. The legacy K3s
     # lab invokes the shared task directly with its embedded client instead.
     kube_cli_argv: [kubectl]
+    # Cloud/on-prem controllers must supply this with -e or their configured
+    # environment. It is deliberately not inherited from the K3s lab.
+    kubeconfig: ""
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   tasks:
+    - name: Require a non-lab Kubernetes client configuration
+      ansible.builtin.assert:
+        that:
+          - kubeconfig | length > 0
+          - kube_cli_argv == ['kubectl']
+        fail_msg: Supply a kubeadm/EKS/AKS kubeconfig and standard kubectl; configure-mesh never inherits K3s lab settings.
+    - name: Show the selected mesh controller client contract
+      ansible.builtin.debug:
+        msg:
+          kubeconfig: "{{ kubeconfig }}"
+          kube_cli_argv: "{{ kube_cli_argv }}"
+          deployment_profile: "{{ deployment_profile }}"
     - name: Require a configured Helm client
       ansible.builtin.command: helm version --short
       changed_when: false
@@ -29,12 +44,17 @@
       register: rag_namespace_create
       changed_when: "'created' in rag_namespace_create.stdout"
       failed_when: rag_namespace_create.rc != 0 and 'AlreadyExists' not in rag_namespace_create.stderr
+    - name: Enable Istio sidecar injection for the application namespace
+      ansible.builtin.command:
+        argv: "{{ kube_cli_argv + ['label', 'namespace', rag_namespace, 'istio-injection=enabled', '--overwrite'] }}"
+      changed_when: false
     - name: Register mesh Helm repositories
       ansible.builtin.command:
         argv: [helm, repo, add, "{{ item.name }}", "{{ item.url }}", --force-update]
       loop:
         - {name: istio, url: "https://istio-release.storage.googleapis.com/charts"}
         - {name: spiffe, url: "https://spiffe.github.io/helm-charts-hardened/"}
+        - {name: metallb, url: "https://metallb.github.io/metallb"}
       changed_when: false
     - name: Refresh mesh Helm repositories
       ansible.builtin.command: helm repo update
