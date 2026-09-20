@@ -1,0 +1,16 @@
+# EKS overlay. Supply the reviewed IRSA role annotation, S3 bucket, private
+# OpenSearch endpoint, and immutable image through an environment values file.
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+serviceAccount:
+  # IRSA needs its projected web-identity token; set the role ARN only in the
+  # environment values file used by the deployment controller.
+  automountServiceAccountToken: true
+config:
+  ENABLE_AUDIT_STORE: "true"
+  AUDIT_BACKEND: s3
+  SEARCH_AUTH_MODE: aws_sigv4
+auditInit:
+  enabled: false
