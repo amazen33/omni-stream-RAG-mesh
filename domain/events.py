@@ -82,7 +82,7 @@ class TransactionProcessed(DomainEvent):
 class PaymentTransactionIngested(DomainEvent):
     """Sanitized payment event contract; raw identifiers never enter this event."""
 
-    topic: ClassVar[str] = "payments.transaction.ingested.v1"
+    topic: ClassVar[str] = "payments.transaction.ingested.v2"
     transaction_token: str = ""
     merchant_token: str = ""
     amount_minor: int = 0
@@ -93,7 +93,7 @@ class PaymentTransactionIngested(DomainEvent):
 
 @dataclass(frozen=True)
 class PaymentRiskScored(DomainEvent):
-    topic: ClassVar[str] = "payments.risk.scored.v1"
+    topic: ClassVar[str] = "payments.risk.scored.v2"
     transaction_token: str = ""
     risk_score: float = 0.0
     decision: str = "review"
@@ -135,7 +135,7 @@ class TransactionCompensated(CompensatingEvent):
 
 @dataclass(frozen=True)
 class PaymentCompensated(CompensatingEvent):
-    topic: ClassVar[str] = "payments.compensated.v1"
+    topic: ClassVar[str] = "payments.compensated.v2"
     transaction_token: str = ""
     decision: str = "review"
     error_detail: str = ""
