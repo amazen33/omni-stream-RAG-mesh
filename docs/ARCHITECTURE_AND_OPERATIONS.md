@@ -78,13 +78,17 @@ sensitive field.
 | `StateTransitionLogged` | `state.transition.logged` | Lifecycle state evidence |
 | `IngestionCompensated` | `ingestion.compensated` | Ingestion side-effect failure |
 | `TransactionCompensated` | `transaction.compensated` | Retrieval/audit compensation |
-| `PaymentCompensated` | `payments.compensated.v1` | Fail-closed payment risk handling |
+| `PaymentTransactionIngested` | `payments.transaction.ingested.v2` | Token-only payment intake |
+| `PaymentRiskScored` | `payments.risk.scored.v2` | Token-only risk decision |
+| `PaymentCompensated` | `payments.compensated.v2` | Fail-closed payment risk handling |
 
 Treat event names, topic names, and field meanings as integration contracts.
 Prefer additive fields. Changing a meaning, removing/renaming a field, or
 changing a topic requires a consumer migration and compatibility plan. The
 current publisher produces JSON; it is not a Registry-validated Avro outbox and
-does not prove durable exactly-once delivery.
+does not prove durable exactly-once delivery. The registered v2 Avro artifacts
+match the tokenized payment event fields and are a separate producer/consumer
+contract; register them before enabling a schema-enforced payment pipeline.
 
 ## Key architecture decisions
 
@@ -109,6 +113,12 @@ encryption, bucket/container policy, read permissions, and restore tests are
 operator responsibilities. The in-process fallback is bounded and exists only
 for development and tests.
 
+Kafka producer creation is single-flight and connection failures are deferred
+for `KAFKA_RECONNECT_BACKOFF_SECONDS` (30 seconds by default), so an outage
+does not make every request reconnect. It publishes with `acks=all`; payment
+events use their HMAC `transaction_token` as the Kafka key to retain per-payment
+partition order without exposing a raw identifier.
+
 An audit failure after indexing triggers a best-effort removal of the newly
 created vector/search chunk IDs before recording compensation. This is a
 bounded compensating transaction, not event-sourcing-based rollback:
@@ -127,14 +137,20 @@ model services. Secrets, certificates, salt values, and Terraform state must
 never enter Git. The deployment includes `rag-api`-scoped default-deny
 Kubernetes NetworkPolicy; the allow policy permits only Istio ingress,
 Prometheus' merged metrics port, configured in-namespace dependencies, istiod
-xDS, and CoreDNS as needed.
+xDS, and CoreDNS as needed. Cloud overlays additionally permit HTTPS to
+configured storage/identity endpoints. Standard Kubernetes NetworkPolicy has
+no FQDN rule: replace each overlay's broad HTTPS CIDR with an approved private
+endpoint or egress-gateway CIDR before production. The GKE profile explicitly
+allows the documented Workload Identity metadata-server paths.
 
 The mesh deployment sequence installs SPIRE CRDs, the pinned hardened SPIRE
 chart (server, agent, Controller Manager, CSI driver, and OIDC discovery
 provider), then Istio base, control plane, and gateway. The Controller Manager
-reconciles one selected `rag-api` `ClusterSPIFFEID`; the CSI driver mounts its
-X.509 SVID at `/run/spiffe/workload`. When SPIFFE is enabled, readiness verifies
-the projected SVID files without exposing their contents. Istio runs in sidecar mode and
+reconciles one selected `rag-api` `ClusterSPIFFEID`; the CSI driver bind-mounts
+the directory containing the Workload API Unix socket at
+`/run/spiffe/workload`. When SPIFFE is enabled, readiness opens the local
+`SPIFFE_ENDPOINT_SOCKET`; it does not expect or read projected SVID files.
+Istio runs in sidecar mode and
 independently enforces STRICT mTLS. SPIRE application identity is not a
 replacement for istiod's Envoy certificate path, and Ambient mode is out of
 scope for this integration.
@@ -168,6 +184,13 @@ in-place conversion procedure. The supplied topology has one control plane for
 lab use. Production needs an approved HA control-plane endpoint, durable CSI
 storage, capacity planning, backups, and a tested recovery design before the
 mesh is enabled.
+
+The kubeadm distribution has no dynamic StorageClass. For an approved
+local-disk on-prem target only, enable the optional pinned Rancher Local Path
+provisioner with `-e install_local_path_provisioner=true`, then configure the
+mesh with `storage_class=local-path`. It is pinned to `v0.0.36` in
+`ansible/kubernetes-vars.yaml` and is not a replacement for replicated
+production CSI storage.
 
 Terraform's AWS/Azure/GCP starters provide audit/search-related inputs. They do
 not create a complete VPC/VNet, private endpoint/PrivateLink, EKS/AKS/GKE
@@ -239,7 +262,7 @@ Before admitting traffic, prove all of the following:
    `kubectl get clusterspiffeid rag-api` succeed and resolve to the intended
    trust domain.
 2. A `rag-api` pod has both `istio-proxy` and the `spiffe-workload-api` volume,
-   and `/health/ready` reports `spiffe_svid` as `ok`.
+   and `/health/ready` reports `spiffe_workload_api` as `ok`.
 3. `PeerAuthentication/rag-api-strict-mtls` is STRICT and plaintext direct
    traffic is rejected.
 4. The WAF can reach only the Istio gateway, never `rag-api` directly.
