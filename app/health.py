@@ -108,13 +108,7 @@ def _audit_store() -> None:
         raise LookupError("not configured")
     from .audit import AuditSink
 
-    sink = AuditSink()
-    if sink.s3 is not None:
-        sink.s3.head_bucket(Bucket=sink.bucket)
-    elif sink.azure_container is not None:
-        sink.azure_container.get_container_properties(timeout=_timeout())
-    else:
-        raise RuntimeError("audit store client unavailable")
+    AuditSink().healthcheck(timeout=_timeout())
 
 
 def _vector_store() -> None:
@@ -128,21 +122,24 @@ def _vector_store() -> None:
 
 
 def _spiffe_svid() -> None:
-    """Confirm that the CSI-projected workload SVID is present and non-empty.
+    """Confirm a local connection to the CSI-projected Workload API socket.
 
-    This is intentionally a local check: the SPIFFE CSI driver owns renewal and
-    the application must not log or copy its key material.  A mesh deployment
-    that explicitly requires an SVID is not ready until the projected identity
-    exists, preventing STRICT mTLS from accepting an identity-less workload.
+    The SPIFFE CSI driver bind-mounts the directory containing the Workload API
+    Unix socket; it does not project ``svid.pem``, ``svid.key``, or a bundle.
+    Connecting locally verifies that the workload can ask the agent for an
+    SVID without reading, copying, or logging key material.
     """
     if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() != "true":
         raise LookupError("not configured")
-    path = os.getenv("SPIFFE_SVID_PATH", "/run/spiffe/workload")
-    required = ("svid.pem", "svid.key", "svid_bundle.pem")
-    missing = [name for name in required if not os.path.isfile(os.path.join(path, name))]
-    empty = [name for name in required if not missing and os.path.getsize(os.path.join(path, name)) == 0]
-    if missing or empty:
-        raise RuntimeError("SPIFFE workload identity unavailable")
+    endpoint = os.getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spiffe/workload/agent.sock")
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "unix" or parsed.netloc or not os.path.isabs(parsed.path):
+        raise RuntimeError("SPIFFE Workload API endpoint is invalid")
+    if not hasattr(socket, "AF_UNIX"):
+        raise RuntimeError("SPIFFE Workload API Unix sockets are unsupported on this runtime")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(_timeout())
+        client.connect(parsed.path)
 
 
 _CHECKS: dict[str, Callable[[], None]] = {
@@ -153,7 +150,7 @@ _CHECKS: dict[str, Callable[[], None]] = {
     "ollama": _ollama,
     "audit_store": _audit_store,
     "vector_store": _vector_store,
-    "spiffe_svid": _spiffe_svid,
+    "spiffe_workload_api": _spiffe_svid,
 }
 
 
@@ -200,7 +197,7 @@ class HealthService:
         if os.getenv("ENABLE_VECTOR_STORE", "false").lower() == "true":
             required.add("vector_store")
         if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() == "true":
-            required.add("spiffe_svid")
+            required.add("spiffe_workload_api")
         return required
 
     def report(self, phase: str) -> dict[str, object]:
