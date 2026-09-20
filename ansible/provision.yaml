@@ -6,7 +6,7 @@
   hosts: master:workers
   become: true
   gather_facts: true
-  vars_files: [lab-vars.yaml]
+  vars_files: [mesh-vars.yaml, lab-vars.yaml]
   tasks:
     - name: Require the expected lab topology and operating system
       ansible.builtin.assert:
@@ -38,7 +38,7 @@
   hosts: master
   become: true
   gather_facts: false
-  vars_files: [lab-vars.yaml]
+  vars_files: [mesh-vars.yaml, lab-vars.yaml]
   environment: {KUBECONFIG: "{{ kubeconfig }}"}
   tasks:
     - name: Read node inventory
@@ -75,7 +75,7 @@
   hosts: master:workers
   become: true
   gather_facts: false
-  vars_files: [lab-vars.yaml]
+  vars_files: [mesh-vars.yaml, lab-vars.yaml]
   tasks:
     - name: Install image builder and prerequisites
       ansible.builtin.apt:
@@ -129,13 +129,13 @@
   hosts: master
   become: true
   gather_facts: false
-  vars_files: [lab-vars.yaml]
+  vars_files: [mesh-vars.yaml, lab-vars.yaml]
   environment: {KUBECONFIG: "{{ kubeconfig }}"}
   tasks:
     - name: Download checksum-verified Helm
       ansible.builtin.get_url:
-        url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
-        checksum: "sha256:https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz.sha256sum"
+        url: "{{ helm_download_url }}"
+        checksum: "sha256:{{ helm_download_url }}.sha256sum"
         dest: "{{ rag_remote_dir }}/helm.tar.gz"
         mode: '0644'
     - name: Extract Helm
@@ -190,6 +190,8 @@
     - name: Generate or preserve lab secrets
       ansible.builtin.script: files/create_lab_secret.py {{ rag_namespace }}
       args: {executable: python3}
+      environment:
+        KUBE_CLI: "{{ kube_cli_argv | join(' ') }}"
       no_log: true
     - name: Lint infrastructure chart
       ansible.builtin.command:
@@ -239,9 +241,9 @@
     - name: Verify Istio sidecar and SPIFFE CSI mount are active
       ansible.builtin.assert:
         that:
-          - (rag_api_pods.stdout | from_json).items | length > 0
-          - "'istio-proxy' in ((rag_api_pods.stdout | from_json).items[0].spec.containers | map(attribute='name') | list)"
-          - "'spiffe-workload-api' in ((rag_api_pods.stdout | from_json).items[0].spec.volumes | map(attribute='name') | list)"
+          - (rag_api_pods.stdout | from_json)['items'] | length > 0
+          - "'istio-proxy' in ((rag_api_pods.stdout | from_json)['items'][0].spec.containers | map(attribute='name') | list)"
+          - "'spiffe-workload-api' in ((rag_api_pods.stdout | from_json)['items'][0].spec.volumes | map(attribute='name') | list)"
         fail_msg: rag-api must be sidecar-injected and mount the SPIFFE CSI volume before strict mTLS is accepted.
       when: mesh_enabled | bool
     - name: Verify readiness through Kubernetes service proxy
