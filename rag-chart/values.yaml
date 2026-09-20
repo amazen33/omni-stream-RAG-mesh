@@ -18,6 +18,16 @@ ragApi:
       cpu: 500m
       memory: 512Mi
 
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceAccount:
+  # Cloud overlays may add a narrowly-scoped workload-identity annotation
+  # (for example an EKS IRSA role). Do not put credential values in Helm.
+  annotations: {}
+  automountServiceAccountToken: false
+
 # Keep mesh integration opt-in for plain local Helm use. Ansible and cloud/on-
 # prem overlays enable it only after Istio and SPIRE are installed and healthy.
 mesh:
@@ -44,6 +54,28 @@ spark:
 config: {}
 auditInit:
   enabled: false
+  # `createBucket` is true only for the disposable MinIO lab. Cloud/on-prem
+  # production storage is provisioned and locked before Helm can run.
+  createBucket: false
+  bucket: rag-audit
+  endpoint: ""
+  region: us-east-1
+  lockMode: COMPLIANCE
+  retentionDays: 2555
+  hook: post-install,post-upgrade
+
+networkPolicy:
+  enabled: true
+  ingress:
+    istioNamespace: istio-ingress
+    monitoringNamespace: monitoring
+    metricsPort: 15020
+  egress:
+    workloadNamespace: rag
+    workloadPorts: [8000, 9000, 9092, 9200, 11434, 2113, 5432, 4317]
+    istiodNamespace: istio-system
+    istiodPort: 15012
+    dnsNamespace: kube-system
 # Legacy integration examples are not rendered without explicit opt-in.
 integrations:
   kafka: false
