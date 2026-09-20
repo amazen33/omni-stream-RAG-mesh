@@ -2,11 +2,11 @@
 # Register the Avro/Protobuf artifacts through the platform's secret-managed
 # deployment job; credentials and registry URLs are never committed here.
 subjects:
-  - name: payments.transaction.ingested.v1-value
+  - name: payments.transaction.ingested.v2-value
     format: avro
     compatibility: BACKWARD
     schema: schemas/payment_transaction_ingested.avsc
-  - name: payments.risk.scored.v1-value
+  - name: payments.risk.scored.v2-value
     format: avro
     compatibility: BACKWARD
     schema: schemas/payment_risk_scored.avsc
