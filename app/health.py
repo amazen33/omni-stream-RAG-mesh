@@ -103,18 +103,66 @@ def _schema_registry() -> None:
             raise RuntimeError("unhealthy response")
 
 
+def _audit_store() -> None:
+    if os.getenv("ENABLE_AUDIT_STORE", "false").lower() != "true":
+        raise LookupError("not configured")
+    from .audit import AuditSink
+
+    sink = AuditSink()
+    if sink.s3 is not None:
+        sink.s3.head_bucket(Bucket=sink.bucket)
+    elif sink.azure_container is not None:
+        sink.azure_container.get_container_properties(timeout=_timeout())
+    else:
+        raise RuntimeError("audit store client unavailable")
+
+
+def _vector_store() -> None:
+    if os.getenv("ENABLE_VECTOR_STORE", "false").lower() != "true":
+        raise LookupError("not configured")
+    from .storage import RetrievalStore
+
+    store = RetrievalStore()
+    if store.collection is None or store.embedder is None:
+        raise RuntimeError("vector store unavailable")
+
+
+def _spiffe_svid() -> None:
+    """Confirm that the CSI-projected workload SVID is present and non-empty.
+
+    This is intentionally a local check: the SPIFFE CSI driver owns renewal and
+    the application must not log or copy its key material.  A mesh deployment
+    that explicitly requires an SVID is not ready until the projected identity
+    exists, preventing STRICT mTLS from accepting an identity-less workload.
+    """
+    if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() != "true":
+        raise LookupError("not configured")
+    path = os.getenv("SPIFFE_SVID_PATH", "/run/spiffe/workload")
+    required = ("svid.pem", "svid.key", "svid_bundle.pem")
+    missing = [name for name in required if not os.path.isfile(os.path.join(path, name))]
+    empty = [name for name in required if not missing and os.path.getsize(os.path.join(path, name)) == 0]
+    if missing or empty:
+        raise RuntimeError("SPIFFE workload identity unavailable")
+
+
 _CHECKS: dict[str, Callable[[], None]] = {
     "kafka": _kafka,
     "schema_registry": _schema_registry,
     "chromadb": _chroma,
     "minio": _minio,
     "ollama": _ollama,
+    "audit_store": _audit_store,
+    "vector_store": _vector_store,
+    "spiffe_svid": _spiffe_svid,
 }
 
 
 class HealthService:
-    def __init__(self, checks: dict[str, Callable[[], None]] | None = None):
+    def __init__(
+        self, checks: dict[str, Callable[[], None]] | None = None, required_checks: set[str] | None = None
+    ):
         self.checks = checks or _CHECKS
+        self.required_checks = required_checks
 
     def dependency_status(self) -> dict[str, dict[str, object]]:
         results: dict[str, dict[str, object]] = {}
@@ -132,12 +180,34 @@ class HealthService:
             results[name] = {"status": status, "duration_ms": duration_ms}
             if detail:
                 results[name]["detail"] = detail
-        set_gauge("rag_ready", float(all(v["status"] in {"ok", "disabled"} for v in results.values())))
         return results
+
+    def _hard_dependencies(self) -> set[str]:
+        if self.required_checks is not None:
+            return self.required_checks
+        # Injected checks in unit tests model only hard dependencies. In the
+        # runtime, optional integrations stay diagnostic unless explicitly
+        # selected as a hard requirement.
+        if self.checks is not _CHECKS:
+            return set(self.checks)
+        required = {
+            item.strip()
+            for item in os.getenv("READINESS_REQUIRED_DEPENDENCIES", "").split(",")
+            if item.strip()
+        }
+        if os.getenv("ENABLE_AUDIT_STORE", "false").lower() == "true":
+            required.add("audit_store")
+        if os.getenv("ENABLE_VECTOR_STORE", "false").lower() == "true":
+            required.add("vector_store")
+        if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() == "true":
+            required.add("spiffe_svid")
+        return required
 
     def report(self, phase: str) -> dict[str, object]:
         if phase == "live":
             return {"status": "ok", "checks": {}}
         checks = self.dependency_status()
-        healthy = all(item["status"] in {"ok", "disabled"} for item in checks.values())
+        required = self._hard_dependencies()
+        healthy = all(checks.get(name, {}).get("status") == "ok" for name in required)
+        set_gauge("rag_ready", float(healthy))
         return {"status": "ok" if healthy else "failed", "checks": checks}
