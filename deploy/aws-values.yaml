@@ -14,3 +14,9 @@ config:
   SEARCH_AUTH_MODE: aws_sigv4
 auditInit:
   enabled: false
+networkPolicy:
+  egress:
+    # S3 and regional STS/IRSA endpoints. Replace with reviewed VPC endpoint
+    # CIDRs when the target uses PrivateLink.
+    externalCIDRs: [0.0.0.0/0]
+    externalPorts: [443]
