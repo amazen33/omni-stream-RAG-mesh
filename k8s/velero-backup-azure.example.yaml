@@ -1,0 +1,33 @@
+# AKS/Azure Blob Velero profile. This is an environment example, not a default
+# deployment: replace the bracketed resource identifiers and install the pinned
+# Velero Microsoft Azure plugin with a workload identity before applying it.
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: rag-azure
+  namespace: velero
+spec:
+  provider: azure
+  objectStorage:
+    bucket: rag-velero-backups
+    prefix: rag
+  config:
+    resourceGroup: "<storage-resource-group>"
+    storageAccount: "<backup-storage-account>"
+    subscriptionId: "<subscription-id>"
+  default: false
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: rag-daily-stateful-backup-azure
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"
+  template:
+    storageLocation: rag-azure
+    includedNamespaces: [rag]
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: true
+    ttl: 720h0m0s
+    includeClusterResources: true
