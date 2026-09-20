@@ -21,7 +21,6 @@ spec:
         app.kubernetes.io/name: rag-api
         app.kubernetes.io/component: api
       {{- if and .Values.mesh.enabled .Values.mesh.istio.injectSidecar }}
-      annotations:
         sidecar.istio.io/inject: "true"
       {{- end }}
     spec:
@@ -56,12 +55,12 @@ spec:
             - name: RUNTIME_PROFILE
               value: production
             {{- if and .Values.mesh.enabled .Values.mesh.spiffe.enabled }}
-            # Readiness consumes the CSI-projected SVID locally; it never
-            # copies or emits the private key.
+            # The CSI driver bind-mounts the SPIFFE Workload API socket. The
+            # readiness check only connects to it and never reads key material.
             - name: REQUIRE_SPIFFE_SVID
               value: "true"
-            - name: SPIFFE_SVID_PATH
-              value: {{ .Values.mesh.spiffe.mountPath | quote }}
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: {{ printf "unix://%s/%s" .Values.mesh.spiffe.mountPath .Values.mesh.spiffe.socketFile | quote }}
             {{- end }}
             - name: POD_NAME
               valueFrom:
