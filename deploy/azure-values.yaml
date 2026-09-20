@@ -1,0 +1,12 @@
+# AKS overlay. Use a workload identity/Key Vault-projected Azure storage
+# connection setting in rag-secrets; the Blob backend enforces container
+# immutability provisioned by terraform/azure.
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+config:
+  ENABLE_AUDIT_STORE: "true"
+  AUDIT_BACKEND: azure_blob
+auditInit:
+  enabled: false
