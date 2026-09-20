@@ -1,0 +1,9 @@
+# Generated only on the protected GKE deployment controller. These are
+# identity/location values, not credentials; Application Default Credentials
+# come from GKE Workload Identity and no key file is mounted in rag-api.
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: {{ gcp_workload_identity_service_account | to_json }}
+config:
+  GOOGLE_CLOUD_PROJECT: {{ gcp_project_id | to_json }}
+  AUDIT_BUCKET: {{ gcp_audit_bucket | to_json }}
