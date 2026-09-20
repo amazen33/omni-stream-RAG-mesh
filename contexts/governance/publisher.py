@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from threading import Lock
+import time
 from typing import Any, Iterable
 
 from app.redaction import sanitize_for_boundary
@@ -18,6 +19,13 @@ log = logging.getLogger(__name__)
 def _positive_int(name: str, default: int) -> int:
     try:
         return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _positive_float(name: str, default: float) -> float:
+    try:
+        return max(0.1, float(os.getenv(name, str(default))))
     except ValueError:
         return default
 
@@ -82,6 +90,9 @@ class EventPublisher:
         self.enabled = os.getenv("ENABLE_KAFKA", "false").lower() == "true"
         self._producer = None
         self._producer_lock = Lock()
+        self._connecting = False
+        self._next_connection_attempt = 0.0
+        self._reconnect_backoff_seconds = _positive_float("KAFKA_RECONNECT_BACKOFF_SECONDS", 30.0)
         self.published: deque[tuple[Any, list[tuple[str, bytes]]]] = deque(
             maxlen=_positive_int("EVENT_IN_MEMORY_MAX_RECORDS", 1_000)
         )
@@ -90,26 +101,56 @@ class EventPublisher:
     def _get_producer(self):
         if not self.enabled:
             return None
+        # Only one request may create a producer. The potentially slow network
+        # operation happens outside the lock; concurrent requests skip it and
+        # retain their bounded, non-blocking publication behavior.
         with self._producer_lock:
             if self._producer is not None:
                 return self._producer
-            try:
-                from kafka import KafkaProducer
+            now = time.monotonic()
+            if self._connecting or now < self._next_connection_attempt:
+                return None
+            self._connecting = True
+        try:
+            from kafka import KafkaProducer
 
-                timeout_ms = _positive_int("KAFKA_REQUEST_TIMEOUT_MS", 3_000)
-                self._producer = KafkaProducer(
-                    bootstrap_servers=self.bootstrap,
-                    value_serializer=lambda value: json.dumps(value, sort_keys=True).encode("utf-8"),
-                    max_block_ms=_positive_int("KAFKA_MAX_BLOCK_MS", 500),
-                    request_timeout_ms=timeout_ms,
-                    api_version_auto_timeout_ms=min(timeout_ms, 3_000),
-                    retries=_positive_int("KAFKA_SEND_RETRIES", 3),
-                )
-            except Exception as exc:
-                log.warning("Kafka producer unavailable; will retry on the next event: %s", type(exc).__name__)
-                self._record_delivery_failure(exc)
-                self._producer = None
+            timeout_ms = _positive_int("KAFKA_REQUEST_TIMEOUT_MS", 3_000)
+            created = KafkaProducer(
+                bootstrap_servers=self.bootstrap,
+                value_serializer=lambda value: json.dumps(value, sort_keys=True).encode("utf-8"),
+                # Require all in-sync replicas for the payment/event evidence
+                # contract. The caller still does not wait for delivery.
+                acks="all",
+                max_block_ms=_positive_int("KAFKA_MAX_BLOCK_MS", 500),
+                request_timeout_ms=timeout_ms,
+                api_version_auto_timeout_ms=min(timeout_ms, 3_000),
+                retries=_positive_int("KAFKA_SEND_RETRIES", 3),
+            )
+        except Exception as exc:
+            with self._producer_lock:
+                self._connecting = False
+                self._next_connection_attempt = time.monotonic() + self._reconnect_backoff_seconds
+            log.warning(
+                "Kafka producer unavailable; retry deferred for %.1fs: %s",
+                self._reconnect_backoff_seconds,
+                type(exc).__name__,
+            )
+            self._record_delivery_failure(exc)
+            return None
+        with self._producer_lock:
+            self._connecting = False
+            if self._producer is None:
+                self._producer = created
             return self._producer
+
+    @staticmethod
+    def _message_key(event: Any) -> bytes | None:
+        """Keep all events for one tokenized payment on the same partition."""
+        payment_key = getattr(event, "transaction_token", "")
+        if payment_key:
+            return str(payment_key).encode("utf-8")
+        correlation_key = getattr(event, "correlation_id", "")
+        return str(correlation_key).encode("utf-8") if correlation_key else None
 
     def publish(
         self, event: Any, traceparent: str | None = None, headers: Iterable[tuple[str, bytes | str]] | None = None
@@ -121,7 +162,12 @@ class EventPublisher:
         if producer is None:
             return
         try:
-            future = producer.send(event.topic, value=event.to_dict(), headers=resolved_headers)
+            future = producer.send(
+                event.topic,
+                key=self._message_key(event),
+                value=event.to_dict(),
+                headers=resolved_headers,
+            )
             if hasattr(future, "add_errback"):
                 future.add_errback(self._record_delivery_failure)
         except Exception as exc:
