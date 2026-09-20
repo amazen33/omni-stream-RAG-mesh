@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Deploy the published image through kubectl
+        description: Deploy the published image through the reviewed Helm chart
         type: boolean
         default: false
+      deployment_profile:
+        description: Target values overlay (must match the prepared cluster)
+        type: choice
+        default: generic
+        options: [generic, onprem, aws, azure]
   push:
     tags: ["v*.*.*"]
 
@@ -61,6 +66,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
       - uses: azure/setup-kubectl@v4
       - name: Configure cluster credentials
         env:
@@ -70,11 +78,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/kube"
           printf '%s' "$KUBE_CONFIG" > "$RUNNER_TEMP/kube/config"
           chmod 600 "$RUNNER_TEMP/kube/config"
-      - name: Update and apply manifest
+      - name: Upgrade with the versioned Helm deployment contract
         env:
           KUBECONFIG: ${{ runner.temp }}/kube/config
           IMAGE: ${{ needs.publish.outputs.image }}
+          DEPLOYMENT_PROFILE: ${{ inputs.deployment_profile }}
         run: |
-          kubectl -n rag set image deployment/rag-api api="$IMAGE" --dry-run=client -o yaml |
-            kubectl apply -f -
+          IMAGE_REPOSITORY="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE##*:}"
+          kubectl -n rag get secret rag-secrets -o jsonpath='{.data.PII_TOKEN_SALT}' | grep -q .
+          helm upgrade --install rag ./rag-chart --namespace rag --create-namespace \
+            -f "deploy/${DEPLOYMENT_PROFILE}-values.yaml" \
+            --set "ragApi.image.repository=${IMAGE_REPOSITORY}" \
+            --set "ragApi.image.tag=${IMAGE_TAG}" \
+            --wait --timeout 10m
           kubectl -n rag rollout status deployment/rag-api --timeout=180s
