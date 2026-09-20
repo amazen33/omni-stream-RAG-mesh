@@ -29,7 +29,6 @@ metallb_address_pool: []
 spire_namespace: spire-mgmt
 spire_server_namespace: spire-server
 spire_agent_namespace: spire-system
-spire_controller_manager_namespace: spire-server
 spire_csi_namespace: spire-system
 spire_trust_domain: ""
 spire_cluster_name: ""
