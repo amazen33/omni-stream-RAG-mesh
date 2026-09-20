@@ -1,0 +1,60 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-api-default-deny
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Scope the default-deny policy to this chart's workload. The lab dependency
+  # chart installs in the same namespace and owns its own policies.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-api-allow-required-paths
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingress.istioNamespace | quote }}
+      ports:
+        - {protocol: TCP, port: 8000}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingress.monitoringNamespace | quote }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.networkPolicy.ingress.metricsPort }}}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.workloadNamespace | quote }}
+      ports:
+        {{- range .Values.networkPolicy.egress.workloadPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.istiodNamespace | quote }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.networkPolicy.egress.istiodPort }}}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | quote }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+{{- end }}
