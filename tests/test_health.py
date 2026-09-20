@@ -32,3 +32,13 @@ def test_schema_registry_is_part_of_readiness_when_configured(monkeypatch):
     monkeypatch.setenv("SCHEMA_REGISTRY_URL", "http://registry.invalid")
     service = HealthService({"schema_registry": lambda: None})
     assert service.report("ready")["checks"]["schema_registry"]["status"] == "ok"
+
+
+def test_required_spiffe_svid_is_a_readiness_dependency(monkeypatch, tmp_path):
+    monkeypatch.setenv("REQUIRE_SPIFFE_SVID", "true")
+    monkeypatch.setenv("SPIFFE_SVID_PATH", str(tmp_path))
+    service = HealthService()
+    assert service.report("ready")["status"] == "failed"
+    for name in ("svid.pem", "svid.key", "svid_bundle.pem"):
+        (tmp_path / name).write_text("identity", encoding="utf-8")
+    assert service.report("ready")["status"] == "ok"
