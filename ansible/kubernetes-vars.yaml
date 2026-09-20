@@ -22,3 +22,10 @@ kubeadm_state_marker: /var/lib/kubeadm-bootstrap-complete
 # three-replica quorum needs three schedulable workers; the base API lab needs two.
 full_streaming_lab: false
 minimum_worker_count: 2
+# The upstream kubeadm distribution does not ship a dynamic provisioner. This
+# opt-in is suitable only for disposable/on-prem local disks; managed clouds
+# must use their CSI StorageClass instead.
+install_local_path_provisioner: false
+local_path_provisioner_version: v0.0.36
+local_path_provisioner_manifest_url: "https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_provisioner_version }}/deploy/local-path-storage.yaml"
+local_path_storage_class: local-path
