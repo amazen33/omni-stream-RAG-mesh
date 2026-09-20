@@ -1,0 +1,15 @@
+# Baseline for a prepared conformant Kubernetes cluster. The deploy play
+# supplies an immutable image reference and operators supply connection/secret
+# values through approved Helm values and rag-secrets, never this file.
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+config:
+  ENABLE_AUDIT_STORE: "false"
+  ENABLE_VECTOR_STORE: "false"
+  ENABLE_SEARCH_STORE: "false"
+  ENABLE_KAFKA: "false"
+  ENABLE_OLLAMA_INFERENCE: "false"
+auditInit:
+  enabled: false
