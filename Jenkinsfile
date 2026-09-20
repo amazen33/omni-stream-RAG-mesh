@@ -2,14 +2,19 @@ pipeline {
   agent any
   options { timestamps(); disableConcurrentBuilds() }
   parameters {
+    string(name: 'IMAGE_REPOSITORY', defaultValue: 'ghcr.io/amazen33/omni-stream-rag-mesh', description: 'Published container repository (no mutable latest tag)')
+    string(name: 'IMAGE_TAG', defaultValue: 'candidate', description: 'Immutable image tag or digest selected for this build')
     booleanParam(name: 'PUBLISH_GHCR', defaultValue: false, description: 'Push to GHCR using ghcr-token')
     booleanParam(name: 'PUBLISH_ACR', defaultValue: false, description: 'Push to ACR using azure-sp credentials')
   }
-  environment { IMAGE = "ghcr.io/example/hybrid-rag:${BUILD_TAG}"; ACR_IMAGE = "${AZURE_ACR_LOGIN_SERVER}/hybrid-rag:${BUILD_TAG}" }
+  environment { IMAGE = "${IMAGE_REPOSITORY}:${IMAGE_TAG}"; ACR_IMAGE = "${AZURE_ACR_LOGIN_SERVER}/hybrid-rag:${IMAGE_TAG}" }
   stages {
-    stage('Test') { steps { sh 'python -m pytest -q' } }
+    stage('Set up Python environment') {
+      steps { sh 'python3 -m venv .venv && . .venv/bin/activate && python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r ansible/requirements-controller.txt && python -m pip check' }
+    }
+    stage('Test') { steps { sh '. .venv/bin/activate && python -m pytest -q' } }
     stage('Downstream Chaos & Resilience Gates') {
-      steps { sh 'python -m pytest -v tests/chaos' }
+      steps { sh '. .venv/bin/activate && python -m pytest -v tests/chaos' }
     }
     stage('Build') { steps { sh 'docker build --pull -t "$IMAGE" .' } }
     stage('Trivy image gate') {
