@@ -66,7 +66,7 @@ def test_boundary_metrics_cover_timeout_rate_limit_and_bulkhead():
     assert 'rag_bulkhead_active{boundary="chaos_bulkhead"}' in metrics
     assert 'rag_bulkhead_rejections_total{boundary="chaos_bulkhead"}' in metrics
     assert 'rag_ratelimit_rejections_total{boundary="chaos_rate_limit"}' in metrics
-    assert 'rag_boundary_duration_seconds{boundary="chaos_timeout",operation="invoke"}' in metrics
+    assert 'rag_boundary_duration_seconds_bucket{boundary="chaos_timeout",operation="invoke"' in metrics
     assert 'rag_downstream_failures_total{boundary="chaos_timeout",dependency="timeout"}' in metrics
 
 
@@ -91,8 +91,14 @@ def test_ingestion_failure_emits_compensation_and_immutable_audit_transition(mon
         ("PROCESSING", "COMPENSATED"),
     ]
     compensations = [record for record in main.audit.records if record.get("record_type") == "compensation"]
-    assert compensations[-1]["correlation_id"] == "failure-correlation"
+    assert compensations[-1]["correlation_id"] != "failure-correlation"
     assert compensations[-1]["reason"] == "STORE_ADD_FAILED"
+    assert "client_request_id" not in transitions[0]["payload"]
+    assert "client_correlation_id" not in transitions[0]["payload"]
+    assert transitions[0]["payload"]["source_token"].startswith("<PII_SOURCE_")
+    assert "failure-request" not in str(transitions)
+    assert "failure-correlation" not in str(transitions)
+    assert response.headers["X-Correlation-ID"] != "failure-correlation"
     assert any(isinstance(event, IngestionCompensated) for event, _ in main.publisher.published)
     assert 'rag_compensating_events_total{boundary="retrieval_store",reason="STORE_ADD_FAILED"}' in exposition()
 
