@@ -35,9 +35,13 @@ def test_gcs_audit_backend_requires_bucket_lock_and_uses_create_only_writes(monk
 
         def __init__(self) -> None:
             self.blob_instance = FakeBlob()
+            self.healthcheck_timeout = None
 
         def blob(self, _key: str) -> FakeBlob:
             return self.blob_instance
+
+        def reload(self, timeout: float) -> None:
+            self.healthcheck_timeout = timeout
 
     class FakeClient:
         def __init__(self, bucket: FakeBucket) -> None:
@@ -54,7 +58,10 @@ def test_gcs_audit_backend_requires_bucket_lock_and_uses_create_only_writes(monk
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "locked-audit-project")
     monkeypatch.setattr(storage, "Client", lambda project=None: FakeClient(bucket))
 
-    key = AuditSink().write("request-1", {"event": "safe"}, correlation_id="correlation-1")
+    sink = AuditSink()
+    sink.healthcheck(timeout=1.5)
+    assert bucket.healthcheck_timeout == 1.5
+    key = sink.write("request-1", {"event": "safe"}, correlation_id="correlation-1")
     assert key
     args, kwargs = bucket.blob_instance.call
     assert args[0]
