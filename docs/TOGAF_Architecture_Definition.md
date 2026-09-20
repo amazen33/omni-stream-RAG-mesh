@@ -393,7 +393,7 @@ trust model. Phase A adds payment service providers, merchants, fraud teams,
 and card-network obligations. Phase B adds authorization, settlement,
 chargeback, and anomaly-review value streams. Phase C adds the
 `contexts/payments` bounded context, versioned Avro subjects, Schema Registry,
-and `payments.*.v1` topics. Phase D adds TLS/SASL Kafka, three-broker KRaft
+and `payments.*.v2` topics. Phase D adds TLS/SASL Kafka, three-broker KRaft
 failure domains, Schema Registry, MirrorMaker 2, and LGTM telemetry. Phase E
 promotes from a synthetic non-cardholder-data stream to regional active/passive
 DR, replay drills, and governed model rollout.
@@ -418,7 +418,7 @@ risk --> audit
 flowchart LR
     PSP[Payment Service Provider] --> Ingest[Payment ingestion DDD context]
     Ingest --> Registry[Schema Registry<br/>Avro or Protobuf]
-    Registry --> Kafka[Kafka KRaft<br/>payments.*.v1]
+    Registry --> Kafka[Kafka KRaft<br/>payments.*.v2]
     Kafka --> Risk[LLM anomaly and risk scoring]
     Kafka -. MirrorMaker 2 .-> DR[DR Kafka cluster]
     Risk --> Audit[Governance + immutable audit]
@@ -430,7 +430,7 @@ title Fintech payment streaming - technology and migration
 actor "Payment Service Provider" as psp
 component "Payment ingestion context" as ingest
 component "Schema Registry\nAvro/Protobuf" as registry
-queue "Kafka KRaft\npayments.*.v1" as kafka
+queue "Kafka KRaft\npayments.*.v2" as kafka
 component "Anomaly and risk scoring" as risk
 queue "DR Kafka\nMirrorMaker 2" as dr
 database "Object-lock audit" as audit
@@ -468,7 +468,7 @@ and TimescaleDB.
 | Immutable audit | S3/MinIO Object Lock, Azure Blob locked immutability, or GCS Bucket Lock writes; governed retention and transition/compensation prefixes | Bucket/container created and locked before first write; retention reviewed |
 | Event/read stores | EventStoreDB and TimescaleDB StatefulSets; MirrorMaker 2 manifest | TLS, credentials, HA sizing, projection ownership, restore drill |
 | LGTM | Prometheus scrape targets plus Tempo/Loki/Grafana and OTel Collector definitions | Dashboard/alert ownership and configured Tempo endpoint |
-| Zero trust | Automated SPIRE hardened stack/CSI/Controller Manager, readiness check for the projected SVID, sidecar-mode STRICT Istio PeerAuthentication, selected `rag-api` SPIFFE ID, and private gateway route | Approved per-environment trust domain/CA subject/JWT issuer, storage class, cloud WAF route, and live mTLS/SVID evidence |
+| Zero trust | Automated SPIRE hardened stack/CSI/Controller Manager, readiness connection to the CSI-mounted Workload API socket, sidecar-mode STRICT Istio PeerAuthentication, selected `rag-api` SPIFFE ID, and private gateway route | Approved per-environment trust domain/CA subject/JWT issuer, storage class, cloud WAF route, and live mTLS/SVID evidence |
 | DR | Velero BackupStorageLocation and daily PVC snapshot schedule | S3 plugin/credentials, snapshot class, quarterly isolated restore evidence |
 
 ### Migration controls
