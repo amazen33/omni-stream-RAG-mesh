@@ -1,71 +1,52 @@
-# Architecture Decision Record
+# Architecture Decision Record (ADR)
 
 ## Scope
-Hybrid on-prem/cloud RAG for regulated transaction workloads. Data stays in the selected region; only redacted text leaves trusted boundaries.
 
-## Flow
-CDC (Debezium/Postgres) -> Kafka KRaft (TLS/SASL in production) -> Flink windows/anomaly detector -> MinIO/S3 Parquet + OpenSearch time series. API receives documents, redacts PII, chunks with LangChain-compatible settings, embeds with Ollama, and dual-writes Chroma plus OpenSearch. Retrieval context, prompt, output, request ID and model versions are written to object-locked audit storage.
+Hybrid on-prem/cloud RAG for regulated transaction workloads. Data stays in the
+selected region; only redacted text leaves trusted boundaries.
 
-## Boundaries and security
-Private subnets/VPC/VNet, default-deny Kubernetes NetworkPolicies, workload identity (IRSA/Azure federated identity), KMS/Key Vault encryption, no public buckets, TLS 1.2+, and mTLS hooks via cert-manager (`Certificate`/`Issuer`) or service mesh (Istio/Linkerd). Secrets are external-secrets/Vault references, never Git. Tokenized PII is irreversible with a rotated salt stored in KMS. Audit retention is compliance controlled and delete-protected.
+## Decisions
 
-## Reliability
-Stateless API replicas behind ingress; PVCs for MinIO/OpenSearch/Kafka; Kafka replication factor 3 and min.insync.replicas 2; Flink savepoints and checkpointing; S3 versioning/object lock; OpenSearch snapshots. Rollouts use Argo Rollouts canary steps and automatic rollback on probe/metric failure.
+| Decision | Status | Rationale and boundary |
+| --- | --- | --- |
+| Sanitization before external processing | Accepted | Recognised email, phone, payment-card, and SSN values become versioned, canonicalized 128-bit HMAC tokens before chunking, embeddings, retrieval, model inference, events, search, or audit writes. Source and payment identifiers are also HMAC-tokenized before metadata/events leave the RAG ingress boundary. |
+| Object-locked audit evidence | Accepted | S3/MinIO Object Lock, Azure Blob locked immutability, and GCS Bucket Lock support a governed retention period when their adapters are enabled. Audit records retain server correlation IDs, HMAC tokens, and operational metadata—not raw request content or identifiers. The in-memory fallback is bounded and development/test-only. |
+| Server-owned correlation and compensation | Accepted | The server issues immutable request, correlation, and W3C trace identifiers and discards caller-supplied trace headers. Successful and failed flows record lifecycle transitions and compensations. |
+| Bounded compensation, not event-sourcing claim | Accepted | The implementation removes newly indexed chunks when its following audit write fails and emits compensating events. It does not provide durable event sourcing, atomic outbox delivery, or universal rollback; those require a separate append-only event store, projector, idempotency, and recovery design. |
+| Python resilience policy | Accepted | Bounded bulkheads, queues, retries, transport timeouts, and histogram metrics protect retrieval/model/event boundaries and return safe fallback results where possible. |
+| kubeadm primary on-prem platform | Accepted | Upstream Kubernetes with containerd and Calico is the portable on-prem production target. Managed EKS/AKS/GKE use the same Helm workload contract. K3s is legacy lab/edge only. |
+| SPIRE + Istio sidecars | Accepted | SPIRE supplies an SVID through CSI and application readiness verifies the projection. Istio independently enforces Envoy STRICT mTLS. Neither replaces the other. |
+| Helm as deployment source | Accepted | The Helm chart is the one source for `rag-api`; Ansible and Argo CD render it, and delivery never mutates a Deployment with `kubectl set image`. |
+| Private gateway edge contract | Accepted | WAF → private Istio gateway → `rag-api` is required for on-prem and cloud. Direct WAF/load-balancer access to the workload is prohibited. |
 
-## Portability
-S3-compatible endpoint makes MinIO, AWS S3, and Azure Blob S3 gateway interchangeable. Terraform modules are intentionally small and provider-specific. Configuration is environment/Secret driven. GPU is optional: Ollama uses CPU fallback; NVIDIA toolkit is installed by Ansible where available.
+## Core tradeoffs
 
-## Decisions and tradeoffs
-Chroma is the local low-latency vector store; OpenSearch is the operational/search and analytics index. Dual-write is observable and retryable, with audit events as source of truth. LangChain splitter and Ollama avoid vendor lock-in while allowing managed model replacement.
+Chroma is the local low-latency vector store while OpenSearch is an operational
+search/analytics adapter. Configured stores fail visibly rather than silently
+falling back to per-pod memory. AWS uses SigV4 with a least-privilege workload
+role; non-AWS search uses a protected basic-auth secret when selected.
 
-## Decision: correlation, compensation, and auditable state transitions
+Kafka, EventStoreDB, TimescaleDB, Spark/Flink, and cloud integrations are
+optional extension points. A manifest or Compose service does not establish a
+durable event projection, exactly-once delivery, RTO/RPO, PCI compliance, or
+production readiness without live evidence.
 
-**Status: accepted and implemented.** Every `DomainEvent` is an immutable
-dataclass carrying `event_id`, `correlation_id`, `causation_id`, and optional
-W3C `traceparent`. The payload preserves this metadata and the publisher adds
-the same values as UTF-8 Kafka headers. HTTP middleware establishes a stable
-correlation ID for each request (derived from its request ID when the caller
-does not supply one) and returns it to the client.
+## Mesh and recovery decision
 
-Downstream boundaries use a bulkhead, token bucket, and timeout policy. They
-emit Prometheus-compatible boundary metrics without putting payloads, tenant
-identifiers, URLs, or error messages into labels. A failure creates an explicit
-compensating event and an `INITIALIZED → PROCESSING → COMPENSATED` audit
-transition; successful work ends at `COMPLETED`. MinIO/S3 writes use Object
-Lock `COMPLIANCE` mode for seven years. When the audit adapter is disabled,
-the in-process audit record list supports local testing but is not a durable
-production audit system.
+`ansible/configure-mesh.yaml` installs the pinned SPIRE CRDs/hardened stack and
+Istio in dependency order for a prepared Kubernetes target. It validates a
+non-example trust domain, durable StorageClass, CSI driver, and selected
+`rag-api` `ClusterSPIFFEID` before `ansible/deploy-rag.yaml` rolls out Helm.
+Each environment must provide its approved trust domain, cluster name, CA
+subject, JWT issuer, DNS, WAF route, credentials, and mTLS/SVID acceptance
+evidence.
 
-EventStoreDB and TimescaleDB are supplied as optional stateful Kubernetes and
-Compose services. EventStoreDB must be connected through a reviewed event
-projection/connector before it is treated as the production system of record;
-Kafka and object-locked audit data remain the active application contracts.
+Velero schedules encrypted object-store backups with CSI snapshots and a
+filesystem fallback. Operators must provide the plugin, credentials,
+VolumeSnapshotClass, and tested isolated restore; the manifest alone cannot
+guarantee recovery objectives.
 
-## Decision: mesh identity and disaster recovery
-
-**Status: accepted and automated for prepared Kubernetes targets.** The
-provider-neutral `ansible/configure-mesh.yaml` installs the SPIRE CRDs followed
-by the pinned hardened SPIRE chart (server, agent, Controller Manager, SPIFFE
-CSI driver, and OIDC discovery provider) and the Istio base, control plane, and
-private gateway. It validates a non-example SPIFFE trust domain, the CSI driver,
-and the reconciled `rag-api` `ClusterSPIFFEID` before the application rollout.
-`k8s/service-mesh.yaml` remains the portable raw reference; Ansible renders its
-ingress host per environment.
-
-`rag-api` receives an X.509 SVID through the CSI volume and is selected by its
-namespace, service account, and both stable labels. Istio runs in sidecar mode
-and enforces STRICT mTLS with its own Envoy identity path; SPIRE application
-identity is intentionally not claimed to replace istiod. The primary on-prem
-profile uses kubeadm/containerd and requires an organization WAF to forward
-only to the Istio gateway. AWS, Azure, and generic profiles use the same
-private-gateway path. K3s/Traefik/Coraza remains a legacy lab/edge option.
-Each target supplies an approved trust domain,
-cluster name, CA subject, JWT issuer, StorageClass, DNS, WAF, and live mTLS
-acceptance evidence. The node/image-building K3s play must not be run against
-managed Kubernetes; use the mesh play instead.
-
-Velero configuration schedules daily namespace backups with CSI snapshots and
-filesystem backup fallback to encrypted MinIO/S3 storage. The target cluster
-must provide the Velero AWS/S3 plugin, credentials Secret, volume snapshot
-class, and a tested restore drill; a manifest alone cannot guarantee an RPO or
-RTO.
+See the [architecture and operations guide](docs/ARCHITECTURE_AND_OPERATIONS.md)
+for platform prerequisites and deployment evidence, the
+[TOGAF/ADM implementation](docs/TOGAF_Architecture_Definition.md) for governance,
+and the [C4 model](docs/c4-model/C4_MODEL.md) for structural and dynamic views.
