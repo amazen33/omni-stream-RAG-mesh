@@ -8,7 +8,18 @@ spec:
   source:
     repoURL: https://github.com/amazen33/omni-stream-RAG-mesh.git
     targetRevision: main
-    path: k8s
+    # Helm is the only application deployment source. Set the immutable image
+    # tag in this reviewed Git value (or a protected values repository) rather
+    # than mutating a live Deployment with kubectl set image.
+    path: rag-chart
+    helm:
+      valueFiles:
+        - values.yaml
+      values: |
+        mesh:
+          enabled: true
+          istio: {injectSidecar: true}
+          spiffe: {enabled: true}
   destination:
     server: https://kubernetes.default.svc
     namespace: rag
