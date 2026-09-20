@@ -1,0 +1,11 @@
+# On-premises uses the generic Helm workload contract. Inject endpoint,
+# storage, and audit settings through a reviewed non-versioned values file.
+mesh:
+  enabled: true
+  istio: {injectSidecar: true}
+  spiffe: {enabled: true, csiDriver: csi.spiffe.io, mountPath: /run/spiffe/workload}
+config:
+  ENABLE_AUDIT_STORE: "true"
+  AUDIT_BACKEND: s3
+auditInit:
+  enabled: false
