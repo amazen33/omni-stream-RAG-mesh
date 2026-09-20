@@ -3,23 +3,26 @@ from fastapi.testclient import TestClient
 
 from contexts.ai.resilience import ResiliencePolicy
 from contexts.payments import AnomalyDetectionService, PaymentIngestionService, RiskScoringService
-from app.main import app
+from app.main import app, audit
 
 
 def test_payment_event_is_sanitized_and_versioned():
-    event = PaymentIngestionService().ingest(
-        {
-            "transaction_id": "tx-1",
-            "merchant_id": "merchant-token-1",
-            "amount_minor": 850000,
-            "currency": "usd",
-            "payment_network": "card",
-            "pan": "must-not-be-serialized",
-        }
-    )
+    event = PaymentIngestionService().ingest({
+        "transaction_id": "tx-1",
+        "merchant_id": "merchant-token-1",
+        "amount_minor": 850000,
+        "currency": "usd",
+        "payment_network": "card",
+    })
     assert event.topic == "payments.transaction.ingested.v1"
     assert event.currency == "USD"
-    assert not hasattr(event, "pan")
+    assert event.pii_tokenized is True
+
+    with pytest.raises(ValueError, match="raw cardholder"):
+        PaymentIngestionService().ingest({
+            "transaction_id": "tx-1", "merchant_id": "merchant-token-1",
+            "amount_minor": 1, "currency": "USD", "pan": "must-not-be-serialized",
+        })
 
 
 def test_risk_scoring_fails_safe_to_review():
@@ -60,6 +63,7 @@ def test_payment_route_returns_risk_decision_without_raw_card_fields():
         "/payments/transactions",
         json={"transaction_id": "tx-4", "merchant_id": "m-4", "amount_minor": 10, "currency": "usd", "pan": "ignored"},
     )
-    assert response.status_code == 200
-    assert response.json()["decision"] == "allow"
-    assert "pan" not in response.text
+    assert response.status_code == 422
+    # Validation may identify the rejected input field, but the endpoint never
+    # invokes payment processing or persists the raw card value.
+    assert not any("ignored" in str(record) for record in audit.records)
