@@ -19,8 +19,19 @@ variable "name" {
   default = "hybridrag"
 
   validation {
-    condition     = can(regex("^[a-z0-9]{3,20}$", var.name))
-    error_message = "name must be 3-20 lowercase alphanumeric characters so it can prefix the storage account."
+    condition     = can(regex("^[a-z0-9]{3,19}$", var.name))
+    error_message = "name must be 3-19 lowercase alphanumeric characters so the ${var.name}audit storage account remains within Azure's 24-character limit."
+  }
+}
+
+variable "audit_retention_days" {
+  type        = number
+  default     = 2555
+  description = "Immutable Azure Blob retention period. Change only through approved records governance."
+
+  validation {
+    condition     = var.audit_retention_days >= 1
+    error_message = "audit_retention_days must be at least one day."
   }
 }
 
@@ -79,6 +90,15 @@ resource "azurerm_storage_container" "audit" {
   container_access_type = "private"
 }
 
+# The application writes each audit object with a locked blob policy. This
+# container policy makes the retention contract durable even if a client fails
+# before attaching a per-blob policy.
+resource "azurerm_storage_container_immutability_policy" "audit" {
+  storage_container_resource_manager_id = azurerm_storage_container.audit.resource_manager_id
+  immutability_period_in_days           = var.audit_retention_days
+  protected_append_writes_all_enabled   = true
+}
+
 output "mesh_deployment_contract" {
   value = {
     deployment_profile = "azure"
@@ -86,5 +106,8 @@ output "mesh_deployment_contract" {
     spire_cluster_name = var.spire_cluster_name
     mesh_ingress_host  = var.mesh_ingress_host
     edge_waf           = "Azure WAF or equivalent must forward only to the private Istio gateway"
+    audit_backend      = "azure_blob"
+    audit_container    = azurerm_storage_container.audit.name
+    audit_retention_days = var.audit_retention_days
   }
 }
