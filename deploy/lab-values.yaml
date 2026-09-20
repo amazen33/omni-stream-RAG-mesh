@@ -33,3 +33,5 @@ config:
   HEALTH_CHECK_TIMEOUT_SECONDS: "2"
 auditInit:
   enabled: true
+  createBucket: true
+  endpoint: http://minio:9000
