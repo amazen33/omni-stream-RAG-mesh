@@ -52,6 +52,15 @@ services:
     volumes: [postgres_data:/var/lib/postgresql/data]
     ports: ["5432:5432"]
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.8.0
+    depends_on: [kafka]
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+    ports: ["8081:8081"]
+
   timescaledb:
     image: timescale/timescaledb:2.17.2-pg16
     environment:
@@ -107,7 +116,7 @@ services:
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-minioadmin}"
       
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.6.0
     ports: ["3000:3000"]
     environment:
       - GF_SECURITY_ADMIN_USER=admin
@@ -116,14 +125,14 @@ services:
       - grafana_data:/var/lib/grafana
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.4.2
     ports: ["3100:3100"]
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/tmp/loki
 
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.7.2
     ports: ["3200:3200"]
     command: [ "-config.file=/etc/tempo.yaml" ]
 
@@ -136,7 +145,7 @@ services:
     ports: ["4317:4317", "4318:4318", "8889:8889"]
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.2.1
     ports: ["9090:9090"]
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
