@@ -52,20 +52,28 @@ class RetrievalService:
             retrieved = []
 
         prompt = f"Answer using retrieved evidence only.\nQuestion: {question}\nEvidence: {retrieved}"
-        output = os.getenv("RAG_FALLBACK_MESSAGE", "No indexed evidence is available.")
+        output = os.getenv("RAG_NO_EVIDENCE_MESSAGE", "No indexed evidence is available.")
         llm_error = None
         if retrieved and self.llm:
             try:
                 output = llm_policy.call(lambda: self.llm.invoke(prompt))
             except Exception as exc:
                 llm_error = type(exc).__name__
-                output = os.getenv("RAG_FALLBACK_MESSAGE", "No indexed evidence is available.")
+                output = os.getenv(
+                    "RAG_INFERENCE_UNAVAILABLE_MESSAGE",
+                    "Inference is unavailable; retrieved evidence is returned without a generated answer.",
+                )
+        elif retrieved:
+            output = os.getenv(
+                "RAG_INFERENCE_DISABLED_MESSAGE",
+                "Inference is disabled; retrieved evidence is returned without a generated answer.",
+            )
 
         event = TransactionProcessed(
             request_id=request_id,
             correlation_id=cid,
             traceparent=traceparent or "",
-            transaction_id=request_id,
+            operation_id=request_id,
             status="compensated" if (retrieval_error or llm_error) else "processed",
             metadata={
                 "retrieved_count": len(retrieved),
@@ -85,7 +93,7 @@ class RetrievalService:
                     causation_id=event.event_id,
                     traceparent=traceparent or "",
                     request_id=request_id,
-                    transaction_id=request_id,
+                    operation_id=request_id,
                     reason="DOWNSTREAM_FAILURE_FAIL_SAFE",
                     original_event_type=type(event).__name__,
                     error_detail=f"{boundary}:{error}",
