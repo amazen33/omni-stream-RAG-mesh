@@ -1,9 +1,11 @@
 from __future__ import annotations
-import logging, os, uuid
+import logging
+import os
+import uuid
 from typing import Any, List
-from fastapi import FastAPI, Header, HTTPException, Request, Response
-from pydantic import BaseModel, Field
-from .redaction import redact
+from fastapi import FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
+from .redaction import token_for
 from .audit import AuditSink
 from .storage import RetrievalStore
 from .redaction import PIIRedactor
@@ -26,23 +28,23 @@ app = FastAPI(title="Hybrid Cloud Streaming RAG", version="1.0.0")
 audit = AuditSink()
 store = RetrievalStore()
 publisher = EventPublisher() if os.getenv("ENABLE_KAFKA", "false").lower() == "true" else NullPublisher()
-redactor = PIIRedactor(os.getenv("PII_TOKEN_SALT", "change-me"))
+token_key = os.getenv("PII_TOKEN_SALT", "change-me")
+if token_key == "change-me" and os.getenv("RUNTIME_PROFILE", "local").lower() not in {"local", "test", "development"}:
+    raise RuntimeError("PII_TOKEN_SALT must be replaced outside a local/test runtime")
+redactor = PIIRedactor(token_key)
 ingestion = IngestionService(redactor, publisher)
 retrieval = RetrievalService(store, publisher=publisher)
-payment_ingestion = PaymentIngestionService(publisher=publisher)
+payment_ingestion = PaymentIngestionService(publisher=publisher, token_key=redactor.salt)
 risk_scoring = RiskScoringService(publisher=publisher)
 health = HealthService()
 
-
 @app.middleware("http")
 async def request_boundary(request: Request, call_next):
-    """Establish immutable request tracing before data enters a route."""
+    """Issue server-owned tracing and discard caller-supplied identifiers."""
     request.state.pii_sanitized = request.method in {"GET", "HEAD", "OPTIONS"}
-    request.state.request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-    request.state.correlation_id = request.headers.get("x-correlation-id") or str(
-        uuid.uuid5(uuid.NAMESPACE_URL, f"omni-stream-rag:{request.state.request_id}")
-    )
-    request.state.traceparent = request.headers.get("traceparent") or (
+    request.state.request_id = str(uuid.uuid4())
+    request.state.correlation_id = str(uuid.uuid4())
+    request.state.traceparent = (
         f"00-{uuid.uuid4().hex}-{uuid.uuid4().hex[:16]}-01"
     )
     response = await call_next(request)
@@ -60,26 +62,25 @@ class AskRequest(BaseModel):
     top_k: int = Field(default=4, ge=1, le=20)
 
 class PaymentRequest(BaseModel):
-    transaction_id: str = Field(min_length=1, max_length=128)
-    merchant_id: str = Field(min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+    transaction_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    merchant_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
     amount_minor: int = Field(ge=0)
     currency: str = Field(min_length=3, max_length=3)
-    payment_network: str = Field(default="unknown", max_length=32)
+    payment_network: str = Field(default="unknown", max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-def request_id(value: str | None) -> str:
-    return value or str(uuid.uuid4())
+def request_id() -> str:
+    return str(uuid.uuid4())
 
-def correlation_id(value: str | None, rid: str) -> str:
-    return value or str(uuid.uuid5(uuid.NAMESPACE_URL, f"omni-stream-rag:{rid}"))
+def correlation_id() -> str:
+    return str(uuid.uuid4())
 
 
-def request_context(
-    request: Request, x_request_id: str | None, x_correlation_id: str | None, traceparent: str | None
-) -> tuple[str, str, str]:
-    """Prefer explicit headers while retaining the middleware's one-request context."""
-    rid = request_id(x_request_id or getattr(request.state, "request_id", None))
-    cid = correlation_id(x_correlation_id or getattr(request.state, "correlation_id", None), rid)
-    trace = traceparent or getattr(request.state, "traceparent", "")
+def request_context(request: Request) -> tuple[str, str, str]:
+    """Return only server-issued request, correlation, and trace identifiers."""
+    rid = getattr(request.state, "request_id", None) or request_id()
+    cid = getattr(request.state, "correlation_id", None) or correlation_id()
+    trace = getattr(request.state, "traceparent", "") or f"00-{uuid.uuid4().hex}-{uuid.uuid4().hex[:16]}-01"
     return rid, cid, trace
 
 
@@ -93,8 +94,9 @@ def record_transition(
     payload: dict[str, Any] | None = None,
 ) -> None:
     """Persist and publish a transition without hiding the primary failure."""
+    safe_payload = redactor.sanitize_for_boundary(payload or {})
     try:
-        audit.write_state_transition(correlation, state_from, state_to, reason, payload)
+        audit.write_state_transition(correlation, state_from, state_to, reason, safe_payload)
     except Exception:
         log.exception("state_transition_audit_failed correlation_id=%s", correlation)
     publisher.publish(
@@ -106,15 +108,16 @@ def record_transition(
             state_from=state_from,
             state_to=state_to,
             reason=reason,
-            payload=payload or {},
+            payload=safe_payload,
         ),
         traceparent=traceparent,
     )
 
 
 def record_compensation(correlation: str, record: dict[str, Any]) -> None:
+    safe_record = redactor.sanitize_for_boundary(record)
     try:
-        audit.write_compensation(correlation, record)
+        audit.write_compensation(correlation, safe_record)
     except Exception:
         log.exception("compensation_audit_failed correlation_id=%s", correlation)
 
@@ -164,37 +167,41 @@ def metrics() -> Response:
 def ingest(
     req: IngestRequest,
     request: Request,
-    x_request_id: str | None = Header(default=None),
-    x_correlation_id: str | None = Header(default=None),
-    traceparent: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    rid, cid, trace = request_context(request, x_request_id, x_correlation_id, traceparent)
-    record_transition(cid, rid, "INITIALIZED", "PROCESSING", "Received document for ingestion", trace, {"source": req.source})
+    rid, cid, trace = request_context(request)
+    source_token = redactor.sanitize_for_boundary(req.source, "source")
+    record_transition(cid, rid, "INITIALIZED", "PROCESSING", "Received document for ingestion", trace, {"source_token": source_token})
     try:
-        chunks, counts = ingestion.ingest(req.text, req.source, rid, correlation_id=cid, traceparent=trace)
+        chunks, counts = ingestion.ingest(req.text, source_token, rid, correlation_id=cid, traceparent=trace)
+        chunk_ids = [chunk.chunk_id for chunk in chunks]
         try:
-            store.add([chunk.chunk_id for chunk in chunks], [chunk.text for chunk in chunks])
+            store.add(chunk_ids, [chunk.text for chunk in chunks])
         except Exception as exc:
             log.exception("store_add_failed request_id=%s correlation_id=%s", rid, cid)
             error = type(exc).__name__
             record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Vector store write failed", trace)
             record_compensation(cid, {"boundary": "retrieval_store", "reason": "STORE_ADD_FAILED", "request_id": rid, "error": error})
             publisher.publish(
-                IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source=req.source,
+                IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source_token=source_token,
                                      reason="STORE_ADD_FAILED", error_detail=error), traceparent=trace,
             )
             raise HTTPException(502, "vector store indexing failed") from exc
 
-        payload = {"event": "ingest", "source": req.source, "pii_counts": counts,
-                   "chunk_count": len(chunks), "chunks": [{"index": i, "text": c.text} for i, c in enumerate(chunks)]}
+        payload = {"event": "ingest", "source_token": source_token, "pii_counts": counts,
+                   "chunk_count": len(chunks)}
         try:
             key = audit.write(rid, {**payload, "traceparent": trace}, correlation_id=cid)
         except Exception as exc:
             log.exception("audit_write_failed request_id=%s correlation_id=%s", rid, cid)
+            try:
+                store.remove(chunk_ids)
+            except Exception as rollback_exc:
+                log.exception("store_rollback_failed request_id=%s correlation_id=%s", rid, cid)
+                record_compensation(cid, {"boundary": "retrieval_store", "reason": "ROLLBACK_FAILED", "request_id": rid, "error": type(rollback_exc).__name__})
             record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Audit persistence failed", trace)
             record_compensation(cid, {"boundary": "audit_sink", "reason": "AUDIT_WRITE_FAILED", "request_id": rid, "error": type(exc).__name__})
             publisher.publish(
-                IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source=req.source,
+                IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source_token=source_token,
                                      reason="AUDIT_WRITE_FAILED", error_detail="audit sink unavailable"), traceparent=trace,
             )
             raise HTTPException(503, "audit sink unavailable") from exc
@@ -209,7 +216,7 @@ def ingest(
         record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Unhandled ingestion failure", trace)
         record_compensation(cid, {"boundary": "ingestion", "reason": "UNHANDLED_FAILURE", "request_id": rid, "error": error})
         publisher.publish(
-            IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source=req.source,
+            IngestionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, source_token=source_token,
                                  reason="UNHANDLED_FAILURE", error_detail=error), traceparent=trace,
         )
         raise HTTPException(500, "internal ingestion failure") from exc
@@ -218,13 +225,18 @@ def ingest(
 def ingest_payment(
     req: PaymentRequest,
     request: Request,
-    x_request_id: str | None = Header(default=None),
-    x_correlation_id: str | None = Header(default=None),
-    traceparent: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Accept only a tokenized payment envelope, never raw cardholder data."""
-    rid, cid, trace = request_context(request, x_request_id, x_correlation_id, traceparent)
-    record_transition(cid, rid, "INITIALIZED", "PROCESSING", "Payment transaction received", trace, {"merchant_id": req.merchant_id})
+    """Tokenize payment identifiers at the RAG ingress; reject cardholder data."""
+    rid, cid, trace = request_context(request)
+    record_transition(
+        cid,
+        rid,
+        "INITIALIZED",
+        "PROCESSING",
+        "Payment transaction received",
+        trace,
+        {"payment_requested": True},
+    )
     try:
         event = payment_ingestion.ingest(req.model_dump(), correlation_id=cid, traceparent=trace)
         score = risk_scoring.score(event, traceparent=trace)
@@ -236,10 +248,10 @@ def ingest_payment(
 
     if score.failure_reason:
         record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Risk scoring failed closed", trace)
-        record_compensation(cid, {"boundary": "payment_risk_scoring", "reason": score.failure_reason, "request_id": rid, "transaction_id": event.transaction_id})
+        record_compensation(cid, {"boundary": "payment_risk_scoring", "reason": score.failure_reason, "request_id": rid, "payment_identifier_token": event.transaction_token})
     else:
         record_transition(cid, rid, "PROCESSING", "COMPLETED", f"Decision: {score.decision}", trace, {"risk_score": score.risk_score, "decision": score.decision})
-    return {"request_id": rid, "correlation_id": cid, "transaction_id": event.transaction_id,
+    return {"request_id": rid, "correlation_id": cid, "transaction_token": event.transaction_token,
             "risk_score": score.risk_score, "decision": score.decision,
             "model_version": score.model_version}
 
@@ -247,11 +259,8 @@ def ingest_payment(
 def ask(
     req: AskRequest,
     request: Request,
-    x_request_id: str | None = Header(default=None),
-    x_correlation_id: str | None = Header(default=None),
-    traceparent: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    rid, cid, trace = request_context(request, x_request_id, x_correlation_id, traceparent)
+    rid, cid, trace = request_context(request)
     record_transition(cid, rid, "INITIALIZED", "PROCESSING", "Question received for retrieval", trace)
     safe_question, _ = redactor.redact(req.question)
     llm = None
@@ -265,9 +274,10 @@ def ask(
     output, retrieved, compensations = retrieval.ask_with_outcome(
         safe_question, req.top_k, rid, correlation_id=cid, traceparent=trace
     )
-    prompt = f"Answer using retrieved evidence only.\nQuestion: {safe_question}\nEvidence: {retrieved}"
-    payload = {"event": "ask", "question": safe_question, "retrieved_chunks": retrieved,
-               "prompt": prompt, "output": output, "traceparent": trace,
+    output, _ = redactor.redact(output)
+    payload = {"event": "ask", "question_token": token_for("query", safe_question, redactor.salt),
+               "retrieved_chunk_count": len(retrieved),
+               "output_token": token_for("answer", output, redactor.salt), "traceparent": trace,
                "compensations": [event.to_dict() for event in compensations]}
     for event in compensations:
         record_compensation(cid, {"boundary": event.error_detail.split(":", 1)[0], "reason": event.reason,
@@ -279,7 +289,7 @@ def ask(
         record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Audit persistence failed", trace)
         record_compensation(cid, {"boundary": "audit_sink", "reason": "AUDIT_WRITE_FAILED", "request_id": rid, "error": type(exc).__name__})
         publisher.publish(
-            TransactionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, transaction_id=rid,
+            TransactionCompensated(correlation_id=cid, traceparent=trace, request_id=rid, operation_id=rid,
                                    reason="AUDIT_WRITE_FAILED", error_detail="audit sink unavailable"), traceparent=trace,
         )
         raise HTTPException(503, "audit sink unavailable") from exc
