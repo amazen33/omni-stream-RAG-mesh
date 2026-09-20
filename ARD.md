@@ -15,7 +15,7 @@ selected region; only redacted text leaves trusted boundaries.
 | Bounded compensation, not event-sourcing claim | Accepted | The implementation removes newly indexed chunks when its following audit write fails and emits compensating events. It does not provide durable event sourcing, atomic outbox delivery, or universal rollback; those require a separate append-only event store, projector, idempotency, and recovery design. |
 | Python resilience policy | Accepted | Bounded bulkheads, queues, retries, transport timeouts, and histogram metrics protect retrieval/model/event boundaries and return safe fallback results where possible. |
 | kubeadm primary on-prem platform | Accepted | Upstream Kubernetes with containerd and Calico is the portable on-prem production target. Managed EKS/AKS/GKE use the same Helm workload contract. K3s is legacy lab/edge only. |
-| SPIRE + Istio sidecars | Accepted | SPIRE supplies an SVID through CSI and application readiness verifies the projection. Istio independently enforces Envoy STRICT mTLS. Neither replaces the other. |
+| SPIRE + Istio sidecars | Accepted | SPIRE CSI bind-mounts the Workload API socket directory. Application readiness verifies that the local `SPIFFE_ENDPOINT_SOCKET` is connectable without reading SVID files or key material. Istio independently enforces Envoy STRICT mTLS. Neither replaces the other. |
 | Helm as deployment source | Accepted | The Helm chart is the one source for `rag-api`; Ansible and Argo CD render it, and delivery never mutates a Deployment with `kubectl set image`. |
 | Private gateway edge contract | Accepted | WAF → private Istio gateway → `rag-api` is required for on-prem and cloud. Direct WAF/load-balancer access to the workload is prohibited. |
 
