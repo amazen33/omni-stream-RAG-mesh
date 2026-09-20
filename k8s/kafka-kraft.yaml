@@ -1,3 +1,6 @@
+# Reference sketch only; it is intentionally not a deployable source. The
+# supported KRaft lab is rendered from deploy/lab-infra/templates/kafka.yaml
+# with the pinned Strimzi operator, node-pool API, storage class and quorum.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata: {name: kafka, namespace: rag}
