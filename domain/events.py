@@ -59,7 +59,9 @@ class DomainEvent:
 class TelemetryIngested(DomainEvent):
     topic: ClassVar[str] = "telemetry.ingested"
     request_id: str = ""
-    source: str = ""
+    # HMAC token created at the RAG ingress boundary; raw source labels never
+    # leave that boundary for telemetry, Kafka, or audit storage.
+    source_token: str = ""
     chunk_count: int = 0
     pii_counts: dict[str, int] = field(default_factory=dict)
 
@@ -68,18 +70,21 @@ class TelemetryIngested(DomainEvent):
 class TransactionProcessed(DomainEvent):
     topic: ClassVar[str] = "transaction.processed"
     request_id: str = ""
-    transaction_id: str = ""
+    # This is the server-generated operation/request identifier, not a caller
+    # transaction reference.  The name prevents a future producer from placing
+    # a raw payment identifier into the generic retrieval event contract.
+    operation_id: str = ""
     status: str = "processed"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class PaymentTransactionIngested(DomainEvent):
-    """Sanitized payment event contract; raw PAN/CVV never enters this event."""
+    """Sanitized payment event contract; raw identifiers never enter this event."""
 
     topic: ClassVar[str] = "payments.transaction.ingested.v1"
-    transaction_id: str = ""
-    merchant_id: str = ""
+    transaction_token: str = ""
+    merchant_token: str = ""
     amount_minor: int = 0
     currency: str = ""
     payment_network: str = ""
@@ -89,7 +94,7 @@ class PaymentTransactionIngested(DomainEvent):
 @dataclass(frozen=True)
 class PaymentRiskScored(DomainEvent):
     topic: ClassVar[str] = "payments.risk.scored.v1"
-    transaction_id: str = ""
+    transaction_token: str = ""
     risk_score: float = 0.0
     decision: str = "review"
     model_version: str = ""
@@ -116,7 +121,7 @@ class CompensatingEvent(DomainEvent):
 class IngestionCompensated(CompensatingEvent):
     topic: ClassVar[str] = "ingestion.compensated"
     request_id: str = ""
-    source: str = ""
+    source_token: str = ""
     error_detail: str = ""
 
 
@@ -124,14 +129,14 @@ class IngestionCompensated(CompensatingEvent):
 class TransactionCompensated(CompensatingEvent):
     topic: ClassVar[str] = "transaction.compensated"
     request_id: str = ""
-    transaction_id: str = ""
+    operation_id: str = ""
     error_detail: str = ""
 
 
 @dataclass(frozen=True)
 class PaymentCompensated(CompensatingEvent):
     topic: ClassVar[str] = "payments.compensated.v1"
-    transaction_id: str = ""
+    transaction_token: str = ""
     decision: str = "review"
     error_detail: str = ""
 
