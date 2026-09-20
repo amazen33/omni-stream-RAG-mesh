@@ -1,7 +1,10 @@
 param(
     [int]$Cpus = 4,
     [int]$MemoryGB = 4,
-    [int]$DiskGB = 6,
+    [int]$DiskGB = 30,
+    [ValidateSet('kubeadm', 'k3s')]
+    [string]$KubernetesMode = 'kubeadm',
+    # K3s remains available only for a deliberately selected edge/lab run.
     [string]$K3sVersion = 'v1.35.8+k3s1'
 )
 $ErrorActionPreference = 'Stop'
@@ -63,6 +66,7 @@ $knownHostsFile = Join-Path $stateDir 'known_hosts'
 Invoke-Multipass -Arguments @('transfer', $knownHostsFile, 'rag-ansible:/home/ubuntu/.ssh/known_hosts')
 Invoke-Multipass -Arguments @('exec', 'rag-ansible', '--', 'chmod', '600', '/home/ubuntu/.ssh/known_hosts')
 
+$k3sInventoryValue = if ($KubernetesMode -eq 'k3s') { "k3s_version=$K3sVersion" } else { '' }
 $inventory = @"
 [controller]
 rag-ansible ansible_connection=local
@@ -78,13 +82,24 @@ rag-worker-2 ansible_host=$($addresses['rag-worker-2'])
 ansible_user=ubuntu
 ansible_python_interpreter=/usr/bin/python3
 ansible_ssh_private_key_file=/home/ubuntu/.ssh/rag_cluster
-k3s_version=$K3sVersion
+$k3sInventoryValue
 "@
 $inventoryFile = Join-Path $stateDir 'inventory.multipass.ini'
 [IO.File]::WriteAllText($inventoryFile, ($inventory.Replace("`r`n", "`n") + "`n"))
 Invoke-Multipass -Arguments @('transfer', $inventoryFile, 'rag-ansible:/home/ubuntu/rag-mesh/inventory.ini')
-Invoke-Multipass -Arguments @('transfer', (Join-Path $repoRoot 'ansible/bootstrap-k3s.yaml'), 'rag-ansible:/home/ubuntu/rag-mesh/ansible/bootstrap-k3s.yaml')
+$bootstrapPlaybook = if ($KubernetesMode -eq 'kubeadm') { 'bootstrap-kubernetes.yaml' } else { 'bootstrap-k3s.yaml' }
+Invoke-Multipass -Arguments @('exec', 'rag-ansible', '--', 'mkdir', '-p', '/home/ubuntu/rag-mesh/ansible/templates')
+Invoke-Multipass -Arguments @('transfer', (Join-Path $repoRoot "ansible/$bootstrapPlaybook"), "rag-ansible:/home/ubuntu/rag-mesh/ansible/$bootstrapPlaybook")
+if ($KubernetesMode -eq 'kubeadm') {
+    foreach ($relativePath in @('ansible/kubernetes-vars.yaml', 'ansible/templates/kubeadm-init.yaml.j2', 'ansible/templates/calico-installation.yaml.j2')) {
+        Invoke-Multipass -Arguments @('transfer', (Join-Path $repoRoot $relativePath), "rag-ansible:/home/ubuntu/rag-mesh/$relativePath")
+    }
+}
 Invoke-Multipass -Arguments @('exec', 'rag-ansible', '--', '/home/ubuntu/ansible-venv/bin/ansible', '-i', '/home/ubuntu/rag-mesh/inventory.ini', 'all', '-m', 'ping')
-Invoke-Multipass -Arguments @('exec', 'rag-ansible', '--', '/home/ubuntu/ansible-venv/bin/ansible-playbook', '-i', '/home/ubuntu/rag-mesh/inventory.ini', '/home/ubuntu/rag-mesh/ansible/bootstrap-k3s.yaml')
-Invoke-Multipass -Arguments @('exec', 'rag-master', '--', 'sudo', 'k3s', 'kubectl', 'get', 'nodes', '-o', 'wide')
-Write-Output 'New cluster ready. The controller private key remains inside rag-ansible.'
+Invoke-Multipass -Arguments @('exec', 'rag-ansible', '--', '/home/ubuntu/ansible-venv/bin/ansible-playbook', '-i', '/home/ubuntu/rag-mesh/inventory.ini', "/home/ubuntu/rag-mesh/ansible/$bootstrapPlaybook")
+if ($KubernetesMode -eq 'kubeadm') {
+    Invoke-Multipass -Arguments @('exec', 'rag-master', '--', 'sudo', 'kubectl', 'get', 'nodes', '-o', 'wide')
+} else {
+    Invoke-Multipass -Arguments @('exec', 'rag-master', '--', 'sudo', 'k3s', 'kubectl', 'get', 'nodes', '-o', 'wide')
+}
+Write-Output "New $KubernetesMode cluster ready. The controller private key remains inside rag-ansible."
