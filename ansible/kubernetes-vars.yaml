@@ -3,6 +3,8 @@
 # containerd. Managed EKS/AKS clusters do not run this playbook.
 kubernetes_minor: v1.35
 kubernetes_apt_repository: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/"
+kubernetes_release_key_url: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key"
+helm_download_url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
 kubeconfig: /etc/kubernetes/admin.conf
 kube_cli_argv: [kubectl]
 kubernetes_control_plane_host: "{{ hostvars[groups['master'][0]].ansible_host }}"
@@ -10,4 +12,13 @@ kubernetes_control_plane_endpoint: "{{ kubernetes_control_plane_host }}:6443"
 kubernetes_pod_subnet: 10.244.0.0/16
 kubernetes_service_subnet: 10.96.0.0/12
 calico_version: v3.32.2
+calico_crds_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/v1_crd_projectcalico_org.yaml"
+calico_operator_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
+# Air-gapped environments mirror these two reviewed artifacts internally and
+# override the URLs; no task embeds a public download address.
 helm_version: v3.19.0
+kubeadm_state_marker: /var/lib/kubeadm-bootstrap-complete
+# Set true only when the Strimzi/Kafka full-lab profile is enabled. Its
+# three-replica quorum needs three schedulable workers; the base API lab needs two.
+full_streaming_lab: false
+minimum_worker_count: 2
