@@ -118,9 +118,9 @@
           - "'spiffe-workload-api' in ((rag_api_pods.stdout | from_json)['items'][0].spec.volumes | map(attribute='name') | list)"
         fail_msg: Refusing traffic because rag-api did not receive its Istio proxy and projected SPIFFE SVID volume.
 
-    - name: Verify readiness through the cluster service proxy
+    - name: Verify readiness inside the workload so STRICT mTLS cannot block it
       ansible.builtin.command:
-        argv: "{{ kube_cli_argv + ['get', '--raw', '/api/v1/namespaces/' ~ rag_namespace ~ '/services/rag-api:8000/proxy/health/ready'] }}"
+        argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'exec', 'deployment/rag-api', '-c', 'api', '--', 'python', '-c', 'import json, urllib.request; response = urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=5); payload = json.load(response); assert payload[\"status\"] == \"ok\"'] }}"
       register: readiness
       changed_when: false
-      failed_when: readiness.rc != 0 or (readiness.stdout | from_json).status != 'ok'
+      failed_when: readiness.rc != 0
