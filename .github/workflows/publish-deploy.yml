@@ -13,7 +13,8 @@ on:
         default: generic
         options: [generic, onprem, aws, azure]
   push:
-    tags: ["v*.*.*"]
+    # Stable tags only; pre-release tags (vX.Y.Z-rc.N) never publish an image.
+    tags: ["v*.*.*", "!v*.*.*-*"]
 
 permissions:
   contents: read
@@ -58,7 +59,8 @@ jobs:
         run: docker push "${{ steps.meta.outputs.image }}"
 
   deploy:
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    # Deploy only when dispatched on a stable tag (RELEASING.md).
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref_type == 'tag' && !contains(github.ref_name, '-')
     needs: publish
     runs-on: ubuntu-latest
     environment: production
