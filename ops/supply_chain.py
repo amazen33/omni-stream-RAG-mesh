@@ -27,7 +27,10 @@ def sha(data):
 
 
 def write(path, value):
-    evidence_path(path).write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+    path = Path(path).resolve()
+    if not path.is_relative_to((ROOT / 'test-results').resolve()) and path != (ROOT / '.tools/supply-chain-state.json').resolve():
+        raise ValueError('Scanner JSON must stay in test-results or the fixed first-seen state file')
+    path.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
 
 
 def fetch(url):
@@ -61,6 +64,10 @@ def run(command, output, allowed=(0,), env=None):
     executable = Path(command[0]).resolve()
     if executable.parent != (ROOT / '.tools/scanners').resolve() or executable.name not in ('syft', 'grype', 'osv-scanner'):
         raise ValueError('Only the hash-verified scanner executables may run')
+    options = {'-o', '--platform', '--lockfile', '--no-resolve', '--no-call-analysis=go', '--format=json'}
+    for argument in command[1:]:
+        if str(argument).startswith('-') and argument not in options:
+            raise ValueError('Unexpected scanner option')
     output = evidence_path(output)
     with output.open('wb') as stdout, Path(str(output) + '.stderr.log').open('wb') as stderr:
         result = subprocess.run([str(x) for x in command], stdout=stdout, stderr=stderr, env=env, timeout=1200)
@@ -227,6 +234,20 @@ def scan_locks(binaries, source, out):
     return osv_findings(json.loads(out.read_text()), aliases)
 
 
+def archive_base_locks(commit, output):
+    if not re.fullmatch(r'[a-f0-9]{40}', commit):
+        raise ValueError('Base lock extraction requires an immutable commit SHA')
+    source = evidence_path(output / 'base-source')
+    source.mkdir(exist_ok=True)
+    available = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', commit], cwd=ROOT, text=True).splitlines()
+    for relative in LOCKS:
+        if relative in available:
+            target = evidence_path(source / relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(subprocess.check_output(['git', 'show', commit + ':' + relative], cwd=ROOT))
+    return source
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', required=True)
@@ -239,6 +260,8 @@ def main():
     if args.base_ref and args.baseline_source:
         raise ValueError('Choose a git base ref or an archived baseline source, not both')
     args.out = evidence_path(args.out)
+    if not args.out.is_relative_to((ROOT / 'test-results').resolve()):
+        raise ValueError('Scanner output must be beneath repository test-results')
     args.image = scan_source(args.image)
     if args.baseline_image:
         args.baseline_image = scan_source(args.baseline_image)
@@ -265,14 +288,7 @@ def main():
         run([binaries['grype'], 'sbom:' + str(args.out / 'base.syft.json'), '-o', 'json'], args.out / 'base.grype.json', env=env)
         previous += grype_findings(json.loads((args.out / 'base.grype.json').read_text()))
     if args.base_ref:
-        source = args.out / 'base-source'
-        source.mkdir(exist_ok=True)
-        available = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', args.base_ref], cwd=ROOT, text=True).splitlines()
-        for path in LOCKS:
-            if path in available:
-                target = source / path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(subprocess.check_output(['git', 'show', args.base_ref + ':' + path], cwd=ROOT))
+        source = archive_base_locks(args.base_ref, args.out)
         previous += scan_locks(binaries, source, args.out / 'base.osv.json')
     elif args.baseline_source:
         previous += scan_locks(binaries, args.baseline_source, args.out / 'base.osv.json')

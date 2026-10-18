@@ -13,6 +13,7 @@ from .tool_inputs import commit_sha, evidence_path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("lab", "generic", "onprem", "aws", "azure", "gcp")
+WSL = 'wsl.exe'
 
 
 def helm_command():
@@ -20,8 +21,8 @@ def helm_command():
     if binary:
         return [binary]
     cached = ROOT / ".tools/helm/linux-amd64/helm"
-    if os.name == "nt" and cached.is_file() and shutil.which("wsl.exe"):
-        return ["wsl.exe", "--exec", linux_path(cached)]
+    if os.name == "nt" and cached.is_file() and shutil.which(WSL):
+        return [WSL, "--exec", linux_path(cached)]
     raise RuntimeError("Helm v3.19.0 is required; no usable executable was found")
 
 
@@ -40,7 +41,7 @@ def verify_version():
 def render(profile, *, source=ROOT, extra=(), namespace="rag", check=True):
     source = Path(source).resolve()
     command = helm_command()
-    convert = linux_path if command[0] == "wsl.exe" else lambda p: str(p)
+    convert = linux_path if command[0] == WSL else lambda p: str(p)
     values = 'values-twinfra.yaml' if profile == 'twinfra' else f'{profile}-values.yaml'
     args = ["template", "rag", convert(source / 'rag-chart'), "--namespace", namespace,
             '-f', convert(source / 'deploy' / values), '--set', 'ragApi.image.tag=o0-comparison', *extra]

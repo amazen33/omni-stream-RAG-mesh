@@ -101,13 +101,13 @@ resource "azurerm_storage_container_immutability_policy" "audit" {
 
 output "mesh_deployment_contract" {
   value = {
-    deployment_profile = "azure"
-    spire_trust_domain = var.spire_trust_domain
-    spire_cluster_name = var.spire_cluster_name
-    mesh_ingress_host  = var.mesh_ingress_host
-    edge_waf           = "Azure WAF or equivalent must forward only to the private Istio gateway"
-    audit_backend      = "azure_blob"
-    audit_container    = azurerm_storage_container.audit.name
+    deployment_profile   = "azure"
+    spire_trust_domain   = var.spire_trust_domain
+    spire_cluster_name   = var.spire_cluster_name
+    mesh_ingress_host    = var.mesh_ingress_host
+    edge_waf             = "Azure WAF or equivalent must forward only to the private Istio gateway"
+    audit_backend        = "azure_blob"
+    audit_container      = azurerm_storage_container.audit.name
     audit_retention_days = var.audit_retention_days
   }
 }
