@@ -1,8 +1,15 @@
 # Hybrid Streaming RAG
 
-Production-oriented reference implementation for kubeadm-based on-prem and
-managed AWS/Azure/GKE Kubernetes deployments. K3s is retained only as a legacy
-resource-constrained lab/edge workflow.
+Reference implementation, with hosting on Twinfra dev planned under WO-44.
+O0 prepares dependencies, images and the chart; O1 hosting and its acceptance
+receipt are pending. This is not a production-readiness claim. GitHub currently
+lists the repository as public; the owner authorized proceeding with that
+visibility on 2026-10-19. The source licence is unchosen, so no LICENSE file is
+added. Public visibility does not grant a source licence. See
+[THIRD-PARTY.md](THIRD-PARTY.md) for dependency and model licences.
+
+Kubeadm and managed AWS/Azure/GKE profiles remain reference deployment
+blueprints. K3s is a legacy resource-constrained lab/edge workflow.
 
 ## Downstream-failure resilience
 
@@ -62,8 +69,9 @@ decisions. [LAB_OPERATIONS.md](LAB_OPERATIONS.md) is the concise operational
 entry point.
 
 CI configuration lives in `.github/workflows/`: pull requests run tests,
-Docker build, and Trivy image/IaC gates. Publishing and deployment are
-explicit, secret-driven operations; see the
+Helm and infrastructure validation, main/lab image builds, Syft SBOM generation,
+Grype image scans and OSV lock-file scans under the ADR-0049 rules. Every external
+action is pinned by commit SHA. See the
 [architecture and operations guide](docs/ARCHITECTURE_AND_OPERATIONS.md). `docker compose
 exec rag-api sh` is the supported local debugging shell; the image does not
 include or run an SSH daemon.
@@ -76,8 +84,13 @@ Docker, and Kubernetes; changing the host OS does not make Python 3.14
 compatible.
 
 To run directly with Python 3.12: `python -m venv .venv`, activate the
-environment, run `python -m pip install -r requirements.txt`, then
+environment, run `python -m pip install --require-hashes -r requirements-dev.txt`,
+then explicitly set `RUNTIME_PROFILE=local` before running
 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+An unset profile means production and requires a non-default `PII_TOKEN_SALT`.
+Swagger, ReDoc and OpenAPI URLs return 404 unless `ENABLE_API_DOCS=true` in a
+local, test or development profile. Errors log only safe identifiers and
+exception types; development tracebacks require `LOG_INCLUDE_TRACEBACKS=true`.
 Run `python -m pytest -q` for all tests, including deterministic failure injection.
 Run `python -m pytest -v tests/chaos/test_lifecycle_downstream_failure.py` to
 verify correlation propagation, metrics, audit transitions, and fail-closed
@@ -90,8 +103,39 @@ for verified behavior, production gaps, and acceptance work.
 The immutable integration events `TelemetryIngested`, `TransactionProcessed`, and
 `AuditRecordLogged` map to the Kafka topics `telemetry.ingested`,
 `transaction.processed`, and `audit.record.logged`. Kafka, Ollama, Chroma,
-Elasticsearch/OpenSearch, and MinIO adapters are opt-in through environment
+OpenSearch and object-storage adapters are opt-in through environment
 variables, so health checks remain usable during dependency outages.
+
+## Images and Twinfra delivery
+
+`docker build --build-arg PROFILE=main -t local/omni-o0:main .` builds the shipped
+image from the hashed `requirements.txt`. It excludes Chroma and its native
+dependency tree, including NumPy and ONNX Runtime. `PROFILE=lab` selects
+`requirements-lab.txt` for local development only, never shipped or released.
+The full `docker-compose.yaml` builds this lab image; the standalone
+`docker-compose.local.yaml` uses main. Main reports a clear failed readiness
+check if `ENABLE_VECTOR_STORE=true`; OpenSearch is the planned Twinfra store.
+
+Twinfra uses `deploy/values-twinfra.yaml`: one ephemeral replica, no PDB, no
+mesh, no ServiceAccount API token and no external integrations. In-memory
+retrieval and audit state are lost on restart and cannot be shared across pods.
+The gateway namespace is `platform-services`, with the APISIX pod selector from
+Twinfra's `module-2/manifests/apisix-dependency.yaml`. Without a mesh, metrics
+ingress uses port 8000 and no istiod egress is rendered.
+
+Twinfra deploys only through Argo CD. No Twinfra cluster credential may be
+stored in GitHub. The legacy push-deploy job is off unless the owner explicitly
+sets `ENABLE_PUSH_DEPLOY=true` and dispatches it on a stable tag for a separate
+non-Twinfra target. Stable publishing builds main once, scans the OCI artifact,
+pushes that artifact to GHCR by digest using `GITHUB_TOKEN`, and signs provenance
+for that digest. GHCR digest and attestation evidence are available only after
+the owner runs that workflow after merge; local image IDs are separate evidence.
+Prereleases do not publish. No lab image is referenced by the chart.
+
+`llama3.2:3b` remains the existing local model default, but its community licence
+fails Twinfra G3.5 and needs an owner-selected replacement before model hosting.
+No model weights are in either API image. Optional MinIO, Grafana, Loki, Tempo,
+EventStoreDB, TimescaleDB and Confluent Schema Registry are not used on Twinfra.
 
 ## Infrastructure and recovery
 

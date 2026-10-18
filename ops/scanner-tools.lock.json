@@ -1,0 +1,6 @@
+{
+  "source": "Twinfra ADR-0049 and tools/ci/toolchain.lock.json (read-only reference)",
+  "syft": {"version": "1.52.0", "url": "https://github.com/anchore/syft/releases/download/v1.52.0/syft_1.52.0_linux_amd64.tar.gz", "sha256": "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d", "binarySHA256": "15a52d0122953081d16e6695f48055216a4de293bb005948663bb739a63880f9", "member": "syft"},
+  "grype": {"version": "0.119.0", "url": "https://github.com/anchore/grype/releases/download/v0.119.0/grype_0.119.0_linux_amd64.tar.gz", "sha256": "3fa2dc4b924621ab65404cf08d0b8438d896d80ab949c9d5a4ca283c36004c9b", "binarySHA256": "e02ba25615668c6bae03473e3c6493b6dfffc2e4e419f65f9bd62555ac10cd0e", "member": "grype"},
+  "osv-scanner": {"version": "2.6.0", "url": "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64", "sha256": "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108", "binarySHA256": "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108"}
+}

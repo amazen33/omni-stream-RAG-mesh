@@ -9,6 +9,9 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: streaming-rag-mesh
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   replicas: {{ .Values.ragApi.replicaCount | default 2 }}
   selector:
@@ -20,6 +23,9 @@ spec:
         app: rag-api
         app.kubernetes.io/name: rag-api
         app.kubernetes.io/component: api
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- if and .Values.mesh.enabled .Values.mesh.istio.injectSidecar }}
         sidecar.istio.io/inject: "true"
       {{- end }}
@@ -36,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: "{{ .Values.ragApi.image.repository }}:{{ required "Set ragApi.image.tag to a published application image SHA" .Values.ragApi.image.tag }}"
+          image: "{{ .Values.ragApi.image.repository }}{{ if .Values.ragApi.image.digest }}@{{ .Values.ragApi.image.digest }}{{ else }}:{{ required "Set ragApi.image.tag to a published application image SHA" .Values.ragApi.image.tag }}{{ end }}"
           imagePullPolicy: {{ .Values.ragApi.image.pullPolicy | default "IfNotPresent" }}
           command: ["python", "-m", "uvicorn"]
           args: ["app.main:app", "--host", "0.0.0.0", "--port", "8000"]

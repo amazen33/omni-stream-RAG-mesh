@@ -1,7 +1,28 @@
 import pytest
+import boto3
+from moto import mock_aws
 from google.cloud import storage
 
 from app.audit import AuditSink
+
+
+def test_s3_custom_endpoint_uses_required_only_checksums_and_writes_locked_object(monkeypatch):
+    endpoint = "https://synthetic-s3.example.test"
+    monkeypatch.setenv("MOTO_S3_CUSTOM_ENDPOINTS", endpoint)
+    monkeypatch.setenv("ENABLE_AUDIT_STORE", "true")
+    monkeypatch.setenv("AUDIT_BACKEND", "s3")
+    monkeypatch.setenv("S3_ENDPOINT_URL", endpoint)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AUDIT_BUCKET", "synthetic-locked-audit")
+    with mock_aws():
+        client = boto3.client("s3", endpoint_url=endpoint, region_name="us-east-1")
+        client.create_bucket(Bucket="synthetic-locked-audit", ObjectLockEnabledForBucket=True)
+        sink = AuditSink()
+        assert sink.s3.meta.config.request_checksum_calculation == "when_required"
+        key = sink.write("synthetic-request", {"event": "synthetic-audit"}, correlation_id="synthetic-correlation")
+        record = client.get_object(Bucket="synthetic-locked-audit", Key=key)
+        assert record["ObjectLockMode"] == "COMPLIANCE"
+        assert b'"event":"synthetic-audit"' in record["Body"].read()
 
 
 def test_azure_audit_backend_requires_explicit_connection_configuration(monkeypatch) -> None:

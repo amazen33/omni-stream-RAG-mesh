@@ -15,7 +15,8 @@ mesh:
 config:
   ENABLE_KAFKA: "true"
   ENABLE_AUDIT_STORE: "true"
-  ENABLE_VECTOR_STORE: "true"
+  # Amendment 4: Kubernetes runs the main image; Chroma is Compose lab-only.
+  ENABLE_VECTOR_STORE: "false"
   ENABLE_SEARCH_STORE: "true"
   ENABLE_OLLAMA_INFERENCE: "true"
   KAFKA_BOOTSTRAP_SERVERS: kafka-kafka-bootstrap:9092

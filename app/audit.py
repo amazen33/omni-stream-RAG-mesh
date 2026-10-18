@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -12,6 +14,7 @@ import uuid
 import boto3
 from botocore.config import Config
 from .redaction import sanitize_for_boundary
+from .settings import RuntimeSettings
 
 
 log = logging.getLogger(__name__)
@@ -27,14 +30,15 @@ def _positive_int(name: str, default: int, minimum: int = 1) -> int:
 class AuditSink:
     """Write canonical sanitized audit records without unbounded local copies."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: RuntimeSettings | None = None) -> None:
+        settings = settings or RuntimeSettings.from_environment()
         self.bucket = os.getenv("AUDIT_BUCKET", "rag-audit")
         self.prefix = os.getenv("AUDIT_PREFIX", "requests")
         self.enabled = os.getenv("ENABLE_AUDIT_STORE", "false").lower() == "true"
         self.backend = os.getenv("AUDIT_BACKEND", "s3").lower()
         self.retention = timedelta(days=_positive_int("AUDIT_RETENTION_DAYS", 365 * 7))
         self.lock_mode = os.getenv("AUDIT_LOCK_MODE", "COMPLIANCE").upper()
-        self.pii_token_key = os.getenv("PII_TOKEN_SALT", "change-me")
+        self.pii_token_key = settings.token_key
         if self.lock_mode not in {"COMPLIANCE", "GOVERNANCE"}:
             raise ValueError("AUDIT_LOCK_MODE must be COMPLIANCE or GOVERNANCE")
         if self.lock_mode == "COMPLIANCE" and self.retention.days < 1:
@@ -65,6 +69,10 @@ class AuditSink:
                         connect_timeout=timeout,
                         read_timeout=timeout,
                         retries={"max_attempts": retries, "mode": "standard"},
+                        # boto3 >=1.36 adds optional request checksums that some
+                        # S3-compatible endpoints cannot accept (WO-44 A1).
+                        **({"request_checksum_calculation": "when_required"}
+                           if os.getenv("S3_ENDPOINT_URL") else {}),
                     ),
                 )
             elif self.backend == "azure_blob":
@@ -169,6 +177,9 @@ class AuditSink:
             Key=key,
             Body=body,
             ContentType="application/json",
+            # Object Lock requires an integrity checksum even when optional
+            # SDK checksums are disabled for S3-compatible endpoints.
+            ContentMD5=base64.b64encode(hashlib.md5(body, usedforsecurity=False).digest()).decode("ascii"),
             ObjectLockMode=self.lock_mode,
             ObjectLockRetainUntilDate=now + self.retention,
         )

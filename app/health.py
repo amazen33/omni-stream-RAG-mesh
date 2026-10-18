@@ -21,6 +21,10 @@ class CheckResult:
     detail: str | None = None
 
 
+class ChromaLabImageRequired(RuntimeError):
+    """A controlled readiness reason that never includes exception messages."""
+
+
 def _timeout() -> float:
     try:
         return max(0.05, min(float(os.getenv("HEALTH_CHECK_TIMEOUT_SECONDS", "2")), 10))
@@ -117,6 +121,8 @@ def _vector_store() -> None:
     from .storage import RetrievalStore
 
     store = RetrievalStore()
+    if store.vector_error == "CHROMA_LAB_IMAGE_REQUIRED":
+        raise ChromaLabImageRequired()
     if store.collection is None or store.embedder is None:
         raise RuntimeError("vector store unavailable")
 
@@ -170,6 +176,8 @@ class HealthService:
                 status, detail = "ok", None
             except LookupError:
                 status, detail = "disabled", None
+            except ChromaLabImageRequired:
+                status, detail = "failed", "Chroma is available only in the lab image (PROFILE=lab)"
             except Exception:
                 status, detail = "failed", "dependency unavailable"
             duration_ms = round((time.monotonic() - started) * 1000, 2)

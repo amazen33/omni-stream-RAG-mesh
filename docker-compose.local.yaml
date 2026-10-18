@@ -1,9 +1,14 @@
 # Dependency-free demonstration profile; all data is ephemeral.
 services:
   rag-api:
-    build: .
+    build:
+      context: .
+      args:
+        PROFILE: main
     ports: ["127.0.0.1:8000:8000"]
     environment:
+      RUNTIME_PROFILE: local
+      ANONYMIZED_TELEMETRY: "False"
       ENABLE_AUDIT_STORE: "false"
       ENABLE_KAFKA: "false"
       ENABLE_VECTOR_STORE: "false"

@@ -1,8 +1,14 @@
 services:
   rag-api:
-    build: .
+    build:
+      context: .
+      args:
+        PROFILE: lab
     ports: ["8000:8000"]
     env_file: [.env]
+    environment:
+      RUNTIME_PROFILE: local
+      ANONYMIZED_TELEMETRY: "False"
     depends_on: [minio, opensearch, ollama, chroma]
     read_only: true
     tmpfs: [/tmp]
@@ -24,8 +30,10 @@ services:
     volumes: [ollama_data:/root/.ollama]
     ports: ["11434:11434"]
   chroma:
-    image: chromadb/chroma:0.5.23
-    volumes: [chroma_data:/chroma/chroma]
+    image: chromadb/chroma:1.5.9
+    environment:
+      ANONYMIZED_TELEMETRY: "False"
+    volumes: [chroma_data:/data]
     ports: ["8001:8000"]
   kafka:
     image: apache/kafka:3.9.0

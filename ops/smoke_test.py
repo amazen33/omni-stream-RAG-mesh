@@ -13,6 +13,8 @@ def main():
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     env = dict(os.environ)
+    env["RUNTIME_PROFILE"] = "test"
+    env["ANONYMIZED_TELEMETRY"] = "False"
     for name in ("AUDIT_STORE", "KAFKA", "VECTOR_STORE", "SEARCH_STORE", "OLLAMA_INFERENCE"):
         env[f"ENABLE_{name}"] = "false"
     process = subprocess.Popen(

@@ -1,4 +1,7 @@
 {{- if .Values.integrations.debezium }}
+{{- $secret := required "db.existingSecret is required when integrations.debezium is true" .Values.db.existingSecret }}
+{{- $passwordKey := required "db.passwordKey is required when integrations.debezium is true" .Values.db.passwordKey }}
+{{- $image := required "db.connectImage must identify a reviewed Debezium/Strimzi Connect image" .Values.db.connectImage }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -17,7 +20,7 @@ data:
         "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
         "database.hostname": "{{ .Values.db.host }}",
         "database.user": "{{ .Values.db.user }}",
-        "database.password": "{{ .Values.db.password }}",
+        "database.password": "${secrets:{{ .Release.Namespace }}/{{ $secret }}:{{ $passwordKey }}}",
         "database.dbname": "transactions",
         "topic.prefix": "transactions",
         "plugin.name": "pgoutput",
@@ -26,4 +29,46 @@ data:
         "snapshot.mode": "initial"
       }
     }
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnect
+metadata:
+  name: {{ .Values.db.connectCluster }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  image: {{ $image | quote }}
+  bootstrapServers: {{ default "kafka-kafka-bootstrap:9092" .Values.config.KAFKA_BOOTSTRAP_SERVERS | quote }}
+  config:
+    config.providers: secrets
+    config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
+    group.id: {{ printf "%s-connect" .Values.db.connectCluster | quote }}
+    offset.storage.topic: {{ printf "%s-offsets" .Values.db.connectCluster | quote }}
+    config.storage.topic: {{ printf "%s-configs" .Values.db.connectCluster | quote }}
+    status.storage.topic: {{ printf "%s-status" .Values.db.connectCluster | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.db.connectCluster }}-database-secret
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $secret | quote }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.db.connectCluster }}-database-secret
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.db.connectCluster }}-connect
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.db.connectCluster }}-database-secret
 {{- end }}

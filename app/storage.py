@@ -5,6 +5,7 @@ from collections import OrderedDict
 import logging
 import os
 from typing import Any
+from .safe_logging import log_error
 
 
 log = logging.getLogger(__name__)
@@ -37,19 +38,23 @@ class RetrievalStore:
         if self.vector_enabled:
             try:
                 import chromadb
+                from chromadb.config import Settings
                 from langchain_ollama import OllamaEmbeddings
 
                 self.collection = chromadb.HttpClient(
                     host=os.getenv("CHROMA_HOST", "chroma"),
                     port=int(os.getenv("CHROMA_PORT", "8000")),
+                    settings=Settings(anonymized_telemetry=False),
                 ).get_or_create_collection(os.getenv("CHROMA_COLLECTION", "documents"))
                 self.embedder = OllamaEmbeddings(
                     model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
                     base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
                 )
             except Exception as exc:
-                self.vector_error = type(exc).__name__
-                log.exception("vector_store_initialization_failed error=%s", self.vector_error)
+                self.vector_error = ("CHROMA_LAB_IMAGE_REQUIRED"
+                                     if isinstance(exc, ModuleNotFoundError) and exc.name == "chromadb"
+                                     else type(exc).__name__)
+                log_error(log, "vector_store_initialization_failed", exc)
                 self._record_failure("vector_store", self.vector_error)
 
         if self.search_enabled:
@@ -61,7 +66,7 @@ class RetrievalStore:
                         "text": {"type": "text"}, "source": {"type": "keyword"}
                     }}})
             except Exception as exc:
-                log.exception("search_store_initialization_failed error=%s", type(exc).__name__)
+                log_error(log, "search_store_initialization_failed", exc)
                 raise RuntimeError("configured search store is unavailable") from exc
 
     @staticmethod

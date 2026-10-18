@@ -1,0 +1,3 @@
+# Local development only, never published: WO-44 Amendment 4, D-O12.
+-r requirements.in
+chromadb==1.5.9

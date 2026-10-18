@@ -11,6 +11,7 @@ import time
 from typing import Any, Iterable
 
 from app.redaction import sanitize_for_boundary
+from app.settings import RuntimeSettings
 
 
 log = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def _headers_for(
 
 
 def _assert_boundary_safe(
-    event: Any, headers: Iterable[tuple[str, bytes | str]] | None = None
+    event: Any, token_key: str, headers: Iterable[tuple[str, bytes | str]] | None = None
 ) -> None:
     """Fail closed rather than serializing unredacted material to Kafka.
 
@@ -57,7 +58,6 @@ def _assert_boundary_safe(
     """
     if not hasattr(event, "to_dict"):
         raise ValueError("only serializable domain events may cross the publisher boundary")
-    token_key = os.getenv("PII_TOKEN_SALT", "change-me")
     payload = event.to_dict()
     if sanitize_for_boundary(payload, token_key) != payload:
         raise ValueError("refusing to publish an event containing unsanitized boundary data")
@@ -70,7 +70,8 @@ def _assert_boundary_safe(
 class NullPublisher:
     """Bounded test/local publisher that exposes only recent event evidence."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: RuntimeSettings | None = None) -> None:
+        self.pii_token_key = (settings or RuntimeSettings.from_environment()).token_key
         self.published: deque[tuple[Any, list[tuple[str, bytes]]]] = deque(
             maxlen=_positive_int("EVENT_IN_MEMORY_MAX_RECORDS", 1_000)
         )
@@ -78,14 +79,15 @@ class NullPublisher:
     def publish(
         self, event: Any, traceparent: str | None = None, headers: Iterable[tuple[str, bytes | str]] | None = None
     ) -> None:
-        _assert_boundary_safe(event, headers)
+        _assert_boundary_safe(event, self.pii_token_key, headers)
         self.published.append((event, _headers_for(event, traceparent, headers)))
 
 
 class EventPublisher:
     """Kafka adapter with bounded caller latency and lazy, recoverable startup."""
 
-    def __init__(self, bootstrap: str | None = None) -> None:
+    def __init__(self, bootstrap: str | None = None, settings: RuntimeSettings | None = None) -> None:
+        self.pii_token_key = (settings or RuntimeSettings.from_environment()).token_key
         self.bootstrap = bootstrap or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
         self.enabled = os.getenv("ENABLE_KAFKA", "false").lower() == "true"
         self._producer = None
@@ -155,7 +157,7 @@ class EventPublisher:
     def publish(
         self, event: Any, traceparent: str | None = None, headers: Iterable[tuple[str, bytes | str]] | None = None
     ) -> None:
-        _assert_boundary_safe(event, headers)
+        _assert_boundary_safe(event, self.pii_token_key, headers)
         resolved_headers = _headers_for(event, traceparent, headers)
         self.published.append((event, resolved_headers))
         producer = self._get_producer()

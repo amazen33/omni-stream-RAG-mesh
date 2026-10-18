@@ -132,6 +132,16 @@ is required.
 
 ### Security and identity
 
+`RuntimeSettings` validates configuration before integrations are constructed.
+An absent `RUNTIME_PROFILE` means `production`; unknown profiles fail startup.
+Production requires a non-default `PII_TOKEN_SALT`; audit and event publishing
+receive that same validated key. Do not set a production secret in a Dockerfile,
+ConfigMap or Git. API docs, ReDoc and OpenAPI routes are disabled by default;
+`ENABLE_API_DOCS=true` enables them only in local/test/development. Generate a
+future OpenAPI contract offline rather than exposing a production schema route.
+Operational failures log event, request/correlation IDs and exception type only.
+Tracebacks require `LOG_INCLUDE_TRACEBACKS=true` in a development profile.
+
 Use private networks for Kafka, object storage, search, vector storage, and
 model services. Secrets, certificates, salt values, and Terraform state must
 never enter Git. The deployment includes `rag-api`-scoped default-deny
@@ -159,6 +169,32 @@ The application itself does not implement end-user authentication or
 authorization. The environment must provide TLS termination, identity-aware
 WAF/gateway policy, authorization, CDE/data classification, access reviews,
 and evidence appropriate to its regulatory obligations.
+
+For Twinfra O1, APISIX/Keycloak will supply edge authentication and roles. O0
+does not implement or claim live OIDC acceptance. `deploy/values-twinfra.yaml`
+selects the APISIX namespace `platform-services` and pod labels
+`app.kubernetes.io/name=apisix`, `app.kubernetes.io/instance=apisix`, read from
+Twinfra's `module-2/manifests/apisix-dependency.yaml` (namespace line 203,
+pod labels lines 224–225 at O0 review). The namespace and pod selectors form
+one peer, so both must match. Metrics use 8000 without a mesh; no istiod rule
+or integration egress is rendered. The account namespace label is an O1 owner
+input, not an invented O0 account ID.
+
+The Twinfra profile is one ephemeral replica with PDB disabled, no mesh and
+`automountServiceAccountToken: false`. Restarts lose in-memory retrieval and
+audit state; scaling replicas would split that state. Its intended label remains
+"reference implementation, hosted on Twinfra dev" once O1 is accepted; hosting
+and production evidence are currently pending.
+
+Debezium is opt-in. `db.password` has been removed entirely. Enabling it requires
+`db.existingSecret`, `db.passwordKey` and `db.connectImage`: a reviewed custom
+Kafka Connect image containing the Debezium plugin and Strimzi's
+`io.strimzi.kafka.KubernetesSecretConfigProvider`. The rendered ConfigMap holds
+only `${secrets:namespace/secret:key}`. The worker registers the provider; a
+namespaced Role grants its ServiceAccount `get` on that single named Secret.
+The owner provisions the Secret and registers the connector configuration with
+the prepared Connect REST endpoint. O0 renders/tests this contract without
+building the custom Connect image or deploying the optional connector.
 
 ### Deployment topology and portability
 
@@ -271,14 +307,83 @@ Before admitting traffic, prove all of the following:
 
 ### Delivery, monitoring, and recovery
 
-Pull requests run Python 3.12/3.13 pytest, Ansible/YAML lint and syntax checks,
-Helm rendering/schema checks, a kubeadm config dry-run, Docker build, and Trivy
-image/IaC HIGH/CRITICAL gates. Publishing occurs only for a version tag or explicit dispatch with
-protected secrets. A deployment requires a protected environment and
-`KUBE_CONFIG`; it must use an immutable image tag and the Helm chart. Jenkins
-provides equivalent opt-in publish controls. Argo CD renders `rag-chart/` rather
-than a second raw manifest source; promotion still requires reviewed image
-values, canary thresholds, and rollback criteria.
+Pull requests run Python 3.12/3.13 pytest, chaos and smoke checks, existing
+Ansible/YAML/schema/Terraform checks and the disposable CI Kind contract. Helm
+v3.19.0 compares six profiles with the PR base. Five remain byte-identical;
+Amendment 4 permits only the lab ConfigMap's `ENABLE_VECTOR_STORE` true→false
+change, because the chart uses the main image. Full local Compose retains
+Chroma through the lab image. No lab-infra chart version change is included.
+
+Builds install hash-verified locks: `requirements.txt` for main,
+`requirements-lab.txt` for local lab and `requirements-dev.txt` for tests.
+The refreshed direct dependencies were selected as of 2026-10-19 with a
+14-day cooling cutoff of 2026-10-05T00:00:00Z. Direct inputs are `.in` files;
+uv compile uses `--universal --python-version 3.12 --generate-hashes
+--exclude-newer 2026-10-05T00:00:00Z`; lab is constrained by main and dev by lab.
+Controller tools have their own hashed `ansible/requirements-controller.txt`.
+The digest-pinned Python 3.12 Debian base remains unmodified. Runtime code is
+non-root, read-only, with writable temporary storage supplied by the runtime.
+
+Main excludes Chroma and its native dependency tree. Full Compose builds
+`PROFILE=lab` with Chroma 1.5.9 and the matching `/data` server mount; ephemeral
+Compose builds main. Setting `ENABLE_VECTOR_STORE=true` in main returns failed
+readiness with "Chroma is available only in the lab image" while liveness
+remains available. CI checks adapter imports separately inside both images and
+compares each installed package against [THIRD-PARTY.md](../THIRD-PARTY.md).
+HTTPX is a dev input and also a transitive runtime requirement of the Ollama
+client; pytest, Moto and the dev lock are not installed in either image.
+
+API compatibility changes include LangChain 1.x adapters, OpenSearch client 3.x,
+Kafka client 3.x and Chroma HTTP v2 in the local lab. The local suite covers
+their imports and exercised API calls; it does not establish live provider
+compatibility. Dead `app/metadata.py` and the Elasticsearch client are removed.
+Boto3 custom S3 endpoints use `request_checksum_calculation="when_required"`
+because newer SDK defaults can break compatible stores; Object Lock writes
+still send explicit Content-MD5. Moto validates that request contract.
+
+`ops/supply_chain.py` uses Syft 1.52.0, Grype 0.119.0 and OSV-Scanner 2.6.0,
+with archive and binary hashes copied from Twinfra ADR-0049's tool manifest.
+Syft emits digest-keyed JSON and CycloneDX SBOMs. Grype scans the image SBOM;
+OSV scans the four hashed Python locks with resolution and Go call analysis
+disabled, matching Twinfra. Tool checksums/versions, database timestamp, KEV
+catalogue hash, raw findings and evaluation results are retained as CI artifacts.
+These are image/dependency gates; the retained IaC lint/schema checks are not
+misrepresented as vulnerability scans.
+
+KEV blocks regardless of fix status. Critical findings block when fixed;
+fixable High findings introduced by the PR block immediately and existing High
+findings block at 14 days from first seen. Unfixed and lower findings remain
+reported. First-seen state is cached across CI runs and keyed independently of
+package version; the initial existing-finding epoch is 2026-10-19. Exceptions
+in `security/vulnerability-exceptions.json` are empty. An exception requires
+owner approval, exact package/version/advisory, rationale, expiry (Critical
+30 days, High 60, others 90), and a remediation work order for fixable findings.
+Tool, network or parser failure fails the check rather than becoming a pass.
+
+Stable publishing validates the release stream, builds main once as an OCI
+archive, verifies blob hashes and its main profile, scans that artifact, and
+pushes the same digest to `ghcr.io/amazen33/omni-stream-rag-mesh` with the
+job-scoped `GITHUB_TOKEN`. Signed GitHub build provenance names that digest.
+Only the publish job can write packages or request signing identity. No lab
+image or prerelease is published. Local Docker IDs/sizes demonstrate local
+builds; GHCR digest and provenance are pending the owner's workflow after merge.
+
+Twinfra deploys only through Argo CD, rendering this chart with reviewed digest
+values; no Twinfra cluster credential may be stored in GitHub. The legacy
+non-Twinfra push job is off by default and requires all of
+`ENABLE_PUSH_DEPLOY == 'true'`, explicit deploy dispatch and a stable tag, plus
+its protected environment and target-specific credential. O0 does not enable
+that variable or create credentials. Promotion still requires acceptance,
+canary thresholds and rollback criteria.
+
+The owner has not chosen a source licence and no LICENSE is added. GitHub
+reported public visibility during O0; the owner authorized proceeding on that
+public repository on 2026-10-19, without a repository-setting change. Public
+visibility does not grant a source licence. The third-party register separates main, local-only lab,
+base-os and model licences. Llama 3.2's existing model default fails G3.5 and
+needs an owner-selected replacement before model hosting; no weights ship in
+the API images. MinIO, Grafana, Loki, Tempo, EventStoreDB, TimescaleDB and
+Confluent Schema Registry are optional lab services, not used on Twinfra.
 
 Use `/health/live` or `/healthz` only for liveness, and `/health/ready`,
 `/readyz`, and `/health/startup` for dependency-aware probes. Scrape `/metrics`
@@ -305,7 +410,13 @@ Run the baseline checks before review:
 
 ```bash
 python -m pytest -q --junitxml=test-results/pytest.xml
+python -m pytest -v tests/chaos
 python -m ops.smoke_test
+python -m ops.helm_contract
+docker build --build-arg PROFILE=main -t local/omni-o0:main .
+docker build --build-arg PROFILE=lab -t local/omni-o0:lab .
+python -m ops.collect_image_evidence
+python -m ops.container_smoke --image local/omni-o0:main
 ```
 
 The local suite validates unit/API/redaction/payment/health behavior, adapter

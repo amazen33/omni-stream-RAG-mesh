@@ -26,7 +26,12 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingress.istioNamespace | quote }}
+              kubernetes.io/metadata.name: {{ default .Values.networkPolicy.ingress.istioNamespace .Values.networkPolicy.ingress.gateway.namespace | quote }}
+          {{- with .Values.networkPolicy.ingress.gateway.podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
       ports:
         - {protocol: TCP, port: 8000}
     - from:
@@ -34,8 +39,9 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingress.monitoringNamespace | quote }}
       ports:
-        - {protocol: TCP, port: {{ .Values.networkPolicy.ingress.metricsPort }}}
+        - {protocol: TCP, port: {{ if .Values.mesh.enabled }}{{ .Values.networkPolicy.ingress.metricsPort }}{{ else }}8000{{ end }}}
   egress:
+    {{- if .Values.networkPolicy.egress.workloadPorts }}
     - to:
         - namespaceSelector:
             matchLabels:
@@ -44,12 +50,15 @@ spec:
         {{- range .Values.networkPolicy.egress.workloadPorts }}
         - {protocol: TCP, port: {{ . }}}
         {{- end }}
+    {{- end }}
+    {{- if .Values.mesh.enabled }}
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.istiodNamespace | quote }}
       ports:
         - {protocol: TCP, port: {{ .Values.networkPolicy.egress.istiodPort }}}
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

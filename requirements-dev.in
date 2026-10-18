@@ -1,0 +1,7 @@
+# Development and test dependencies; the runtime image installs requirements.txt only.
+-r requirements-lab.in
+pytest==9.1.1
+httpx==0.28.1
+moto[s3]==5.2.3
+PyYAML==6.0.3
+jsonschema==4.26.0

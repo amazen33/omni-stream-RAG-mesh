@@ -4,94 +4,168 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Deploy the published image through the reviewed Helm chart
+        description: Deploy to a separately approved non-Twinfra target
         type: boolean
         default: false
       deployment_profile:
-        description: Target values overlay (must match the prepared cluster)
+        description: Target overlay for an explicitly enabled push deployment
         type: choice
         default: generic
         options: [generic, onprem, aws, azure]
   push:
-    # Stable tags only; pre-release tags (vX.Y.Z-rc.N) never publish an image.
+    # Stable tags only; prereleases never publish an image.
     tags: ["v*.*.*", "!v*.*.*-*"]
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   validate:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-')
     uses: ./.github/workflows/ci.yml
-  publish:
+
+  build:
     needs: validate
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        name: Define image
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Build and push
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce the accepted stable release stream
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          python3 .github/scripts/release_check.py tag "$GITHUB_REF_NAME" --branch product
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+      - name: Build only the shipped main image as an OCI archive
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
-          load: true
-          push: false
-          tags: ${{ steps.meta.outputs.image }}
-      - name: Scan published image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
+          platforms: linux/amd64
+          build-args: PROFILE=main
+          outputs: type=oci,dest=${{ runner.temp }}/omni-main.tar
+          provenance: false
+          sbom: false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          image-ref: ${{ steps.meta.outputs.image }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-      - name: Push scanned image
-        run: docker push "${{ steps.meta.outputs.image }}"
+          name: omni-main-oci
+          path: ${{ runner.temp }}/omni-main.tar
+          retention-days: 7
+
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: omni-main-oci
+          path: ${{ runner.temp }}/oci
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            .tools/supply-chain-state.json
+            .tools/grype-db
+            .tools/scanners
+          key: o0-scan-release-${{ github.run_id }}
+          restore-keys: |
+            o0-scan-release-
+            o0-scan-main-
+      - name: Verify and scan the exact OCI artifact that will be published
+        env:
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          python -m ops.verify_oci "$RUNNER_TEMP/oci/omni-main.tar" "$IMAGE_DIGEST" --output "$RUNNER_TEMP/verified-oci"
+          python -m ops.build_baseline --base-ref origin/main
+          BASE_IMAGE="local/omni-o0-baseline:$(git rev-parse --short=12 origin/main)"
+          python -m ops.supply_chain --image "oci-archive:$RUNNER_TEMP/oci/omni-main.tar" --image-digest "$IMAGE_DIGEST" \
+            --baseline-image "docker:$BASE_IMAGE" --base-ref origin/main
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: published-main-scan-evidence
+          path: test-results/supply-chain/
+
+  publish:
+    needs: [build, scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.image.outputs.reference }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: omni-main-oci
+          path: ${{ runner.temp }}/oci
+      - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6  # v1.2.4
+        with:
+          version: 1.3.0
+      - name: Push the verified main artifact by digest without rebuilding
+        id: image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          IMAGE_NAME=ghcr.io/amazen33/omni-stream-rag-mesh
+          python3 -m ops.verify_oci "$RUNNER_TEMP/oci/omni-main.tar" "$IMAGE_DIGEST" --output "$RUNNER_TEMP/verified-oci"
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          oras cp --from-oci-layout "$RUNNER_TEMP/verified-oci@$IMAGE_DIGEST" "$IMAGE_NAME@$IMAGE_DIGEST"
+          test "$(oras resolve "$IMAGE_NAME@$IMAGE_DIGEST")" = "$IMAGE_DIGEST"
+          echo "reference=$IMAGE_NAME@$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Sign build provenance for the published digest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
+        with:
+          subject-name: ghcr.io/amazen33/omni-stream-rag-mesh
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
 
   deploy:
-    # Deploy only when dispatched on a stable tag (RELEASING.md).
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    # Off by default. Twinfra uses Argo CD and never supplies a GitHub kubeconfig.
+    if: vars.ENABLE_PUSH_DEPLOY == 'true' && github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && !contains(github.ref_name, '-')
     needs: publish
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
         with:
           version: v3.19.0
-      - uses: azure/setup-kubectl@v4
-      - name: Configure cluster credentials
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
+      - name: Configure credentials for a non-Twinfra opt-in target
         env:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
         run: |
-          test -n "$KUBE_CONFIG" || { echo "KUBE_CONFIG production secret is required"; exit 1; }
+          test -n "$KUBE_CONFIG" || { echo "KUBE_CONFIG is required for an opted-in non-Twinfra target"; exit 1; }
           mkdir -p "$RUNNER_TEMP/kube"
           printf '%s' "$KUBE_CONFIG" > "$RUNNER_TEMP/kube/config"
           chmod 600 "$RUNNER_TEMP/kube/config"
-      - name: Upgrade with the versioned Helm deployment contract
+      - name: Deploy the attested digest through Helm
         env:
           KUBECONFIG: ${{ runner.temp }}/kube/config
           IMAGE: ${{ needs.publish.outputs.image }}
           DEPLOYMENT_PROFILE: ${{ inputs.deployment_profile }}
         run: |
-          IMAGE_REPOSITORY="${IMAGE%:*}"
-          IMAGE_TAG="${IMAGE##*:}"
-          kubectl -n rag get secret rag-secrets -o jsonpath='{.data.PII_TOKEN_SALT}' | grep -q .
           helm upgrade --install rag ./rag-chart --namespace rag --create-namespace \
             -f "deploy/${DEPLOYMENT_PROFILE}-values.yaml" \
-            --set "ragApi.image.repository=${IMAGE_REPOSITORY}" \
-            --set "ragApi.image.tag=${IMAGE_TAG}" \
-            --wait --timeout 10m
+            --set "ragApi.image.repository=${IMAGE%@*}" \
+            --set "ragApi.image.digest=${IMAGE#*@}" --wait --timeout 10m
           kubectl -n rag rollout status deployment/rag-api --timeout=180s
