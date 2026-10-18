@@ -61,6 +61,11 @@ The root [architecture decision record (ADR)](ARD.md) captures durable technical
 decisions. [LAB_OPERATIONS.md](LAB_OPERATIONS.md) is the concise operational
 entry point.
 
+[CLAUDE.md](CLAUDE.md) is the shared Claude Code project contract. It defines
+the planned IoT modernization milestones and requires the full applicable test
+gate after every stage; it does not represent those planned milestones as
+implemented work.
+
 CI configuration lives in `.github/workflows/`: pull requests run tests,
 Docker build, and Trivy image/IaC gates. Publishing and deployment are
 explicit, secret-driven operations; see the

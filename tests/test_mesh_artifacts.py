@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from jinja2 import Environment
 import yaml
 
 
@@ -54,7 +55,7 @@ def test_rag_workload_uses_the_spiffe_csi_volume_when_mesh_enabled() -> None:
     assert "driver: {{ .Values.mesh.spiffe.csiDriver | quote }}" in deployment
     assert "spiffe-workload-api" in deployment
     assert "enabled: false" in values
-    assert "REQUIRE_SPIFFE_SVID" in deployment
+    assert "REQUIRE_SPIFFE_WORKLOAD_API" in deployment
     assert "SPIFFE_ENDPOINT_SOCKET" in deployment
     assert "socketFile: agent.sock" in values
     assert "annotations:\n        sidecar.istio.io/inject" not in deployment
@@ -118,3 +119,19 @@ def test_portable_deployment_play_uses_helm_and_asserts_mesh_injection() -> None
     assert "spiffe-workload-api" in deploy_play
     assert "exec', 'deployment/rag-api'" in deploy_play
     assert "service proxy" not in deploy_play
+
+    readiness_task = next(
+        task
+        for task in yaml.safe_load(deploy_play)[0]["tasks"]
+        if task["name"] == "Verify readiness inside the workload so STRICT mTLS cannot block it"
+    )
+    Environment().parse(readiness_task["ansible.builtin.command"]["argv"])
+
+
+def test_spire_waits_follow_the_hardened_chart_topology() -> None:
+    mesh_tasks = _read("ansible/tasks/mesh.yaml")
+
+    assert "statefulset/spire-server" in mesh_tasks
+    assert "daemonset/spire-agent" in mesh_tasks
+    assert "daemonset/spiffe-csi-driver" in mesh_tasks
+    assert "deployment/spire-controller-manager" not in mesh_tasks

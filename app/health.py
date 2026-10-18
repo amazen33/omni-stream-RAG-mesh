@@ -121,7 +121,7 @@ def _vector_store() -> None:
         raise RuntimeError("vector store unavailable")
 
 
-def _spiffe_svid() -> None:
+def _spiffe_workload_api() -> None:
     """Confirm a local connection to the CSI-projected Workload API socket.
 
     The SPIFFE CSI driver bind-mounts the directory containing the Workload API
@@ -129,7 +129,10 @@ def _spiffe_svid() -> None:
     Connecting locally verifies that the workload can ask the agent for an
     SVID without reading, copying, or logging key material.
     """
-    if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() != "true":
+    if not any(
+        os.getenv(name, "false").lower() == "true"
+        for name in ("REQUIRE_SPIFFE_WORKLOAD_API", "REQUIRE_SPIFFE_SVID")
+    ):
         raise LookupError("not configured")
     endpoint = os.getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spiffe/workload/agent.sock")
     parsed = urlparse(endpoint)
@@ -150,7 +153,7 @@ _CHECKS: dict[str, Callable[[], None]] = {
     "ollama": _ollama,
     "audit_store": _audit_store,
     "vector_store": _vector_store,
-    "spiffe_workload_api": _spiffe_svid,
+    "spiffe_workload_api": _spiffe_workload_api,
 }
 
 
@@ -196,7 +199,10 @@ class HealthService:
             required.add("audit_store")
         if os.getenv("ENABLE_VECTOR_STORE", "false").lower() == "true":
             required.add("vector_store")
-        if os.getenv("REQUIRE_SPIFFE_SVID", "false").lower() == "true":
+        if any(
+            os.getenv(name, "false").lower() == "true"
+            for name in ("REQUIRE_SPIFFE_WORKLOAD_API", "REQUIRE_SPIFFE_SVID")
+        ):
             required.add("spiffe_workload_api")
         return required
 

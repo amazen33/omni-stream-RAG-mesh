@@ -57,7 +57,7 @@ spec:
             {{- if and .Values.mesh.enabled .Values.mesh.spiffe.enabled }}
             # The CSI driver bind-mounts the SPIFFE Workload API socket. The
             # readiness check only connects to it and never reads key material.
-            - name: REQUIRE_SPIFFE_SVID
+            - name: REQUIRE_SPIFFE_WORKLOAD_API
               value: "true"
             - name: SPIFFE_ENDPOINT_SOCKET
               value: {{ printf "unix://%s/%s" .Values.mesh.spiffe.mountPath .Values.mesh.spiffe.socketFile | quote }}

@@ -331,6 +331,23 @@ trust --> k8s
 | 4. Integrate | Enterprise brokers, IAM, SIEM, CMDB, data catalog | Contract and ownership sign-off |
 | 5. Optimize | Model evaluation, cost controls, canary releases | Quality and SLO dashboards accepted |
 
+### Planned IoT modernization delivery stages
+
+The legacy ThingsBoard/Mosquitto modernization is a planned product programme,
+not an implementation claim for this reference repository. It evolves the
+platform through independently verifiable outcomes: Migration Studio, IoT
+domain core, MQTT/PostgreSQL ingestion and Kafka eventing, ThingsBoard rule
+compatibility, reports/SSR/WebSockets, firmware management, evidence/recovery,
+optional monetization, and controlled multi-environment deployment.
+
+The authoritative implementation prompts, stage scope, and acceptance tests
+are maintained in the repository [Claude Code project contract](../CLAUDE.md).
+No stage may be marked complete because a design exists: its code, API/event
+contracts, deployment artifacts, documentation changes, stage-specific tests,
+and full regression gate must pass. In particular, local tests do not prove
+cloud readiness, WORM retention, disaster recovery, payment compliance, or
+legacy rule parity; each requires its specified operational evidence.
+
 ### Drop-in enterprise integration patterns
 
 - Replace the Kafka bootstrap endpoint with managed Kafka or an enterprise

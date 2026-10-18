@@ -73,12 +73,21 @@ jobs:
           ansible-playbook -i inventory.ini playbook.yaml --syntax-check
           ansible-playbook -i inventory.ini ansible/configure-mesh.yaml --syntax-check
           ansible-playbook -i inventory.ini ansible/deploy-rag.yaml --syntax-check
+          # The kubeadm role fetches this optional on-prem StorageClass manifest.
+          # Keep the pinned release available before shipping the playbook.
+          curl --fail --location --silent --show-error --output /dev/null \
+            https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.36/deploy/local-path-storage.yaml
           helm lint deploy/lab-infra
           helm lint rag-chart -f deploy/lab-values.yaml
+          helm lint rag-chart -f deploy/aws-values.yaml --set ragApi.image.tag=validation-image
+          helm lint rag-chart -f deploy/azure-values.yaml --set ragApi.image.tag=validation-image
           helm lint rag-chart -f deploy/gcp-values.yaml --set ragApi.image.tag=validation-image
           mkdir -p test-results
           helm template rag-infra deploy/lab-infra -n rag > test-results/infrastructure.yaml
           helm template rag rag-chart -n rag -f deploy/lab-values.yaml > test-results/application.yaml
+          helm template rag-aws rag-chart -n rag -f deploy/aws-values.yaml --set ragApi.image.tag=validation-image > test-results/application-aws.yaml
+          helm template rag-azure rag-chart -n rag -f deploy/azure-values.yaml --set ragApi.image.tag=validation-image > test-results/application-azure.yaml
+          helm template rag-gcp rag-chart -n rag -f deploy/gcp-values.yaml --set ragApi.image.tag=validation-image > test-results/application-gcp.yaml
           helm template strimzi strimzi-kafka-operator --repo https://strimzi.io/charts/ --version 0.51.0 --include-crds > test-results/strimzi-crds.yaml
           python -m ops.validate_kafka_manifests test-results/infrastructure.yaml test-results/strimzi-crds.yaml
       - name: Validate the rendered kubeadm configuration with kubeadm dry-run
@@ -111,6 +120,7 @@ jobs:
           sha256sum --check --ignore-missing CHECKSUMS
           tar -xzf kubeconform-linux-amd64.tar.gz
           ./kubeconform -strict -summary -skip Kafka,KafkaNodePool "$GITHUB_WORKSPACE/test-results/infrastructure.yaml" "$GITHUB_WORKSPACE/test-results/application.yaml"
+          ./kubeconform -strict -summary "$GITHUB_WORKSPACE/test-results/application-aws.yaml" "$GITHUB_WORKSPACE/test-results/application-azure.yaml" "$GITHUB_WORKSPACE/test-results/application-gcp.yaml"
       - name: Validate raw Kubernetes and mesh manifests
         run: |
           "$RUNNER_TEMP/kubeconform/kubeconform" -strict -ignore-missing-schemas -summary \

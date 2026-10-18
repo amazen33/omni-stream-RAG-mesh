@@ -35,7 +35,7 @@ def test_schema_registry_is_part_of_readiness_when_configured(monkeypatch):
 
 
 def test_required_spiffe_workload_api_is_a_readiness_dependency(monkeypatch):
-    monkeypatch.setenv("REQUIRE_SPIFFE_SVID", "true")
+    monkeypatch.setenv("REQUIRE_SPIFFE_WORKLOAD_API", "true")
     endpoint = "/run/spiffe/workload/agent.sock"
     monkeypatch.setenv("SPIFFE_ENDPOINT_SOCKET", f"unix://{endpoint}")
     connected: list[str] = []
