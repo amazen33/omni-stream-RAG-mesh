@@ -26,6 +26,8 @@ See [RELEASING.md](RELEASING.md) for the release streams.
   log safe error fields. Add the main/lab dependency and model licence register.
 - Amendment 4 intentionally disables Chroma in the legacy lab Helm profile;
   its full local Compose lab continues using the separate lab image.
+- Patch the CI-only Ansible controller to 2.20.9 for CVE-2026-11332 and validate
+  evidence-tool arguments, executable paths and OCI descriptor digests.
 - `Publish and deploy` publishes images only for stable tags (`vX.Y.Z`); pre-release tags
   no longer publish. The deploy job runs only when dispatched on a stable tag.
 

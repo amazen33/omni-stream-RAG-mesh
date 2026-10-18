@@ -99,10 +99,17 @@ jobs:
           curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
           echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
           sudo apt-get update
-          sudo apt-get install -y kubeadm
+          # The runner also has Microsoft's repository, which can otherwise
+          # win with a different Kubernetes minor. Select the configured line.
+          KUBEADM_VERSION="$(apt-cache madison kubeadm | awk '$3 ~ /^1\.35\./ {print $3; exit}')"
+          test -n "$KUBEADM_VERSION"
+          sudo apt-get install -y "kubeadm=$KUBEADM_VERSION"
+          kubeadm version -o short | grep '^v1\.35\.'
+          RUNNER_IP="$(ip -4 -o addr show scope global | awk '{split($4,a,"/"); print a[1]; exit}')"
+          test -n "$RUNNER_IP"
           ansible localhost -c local -m ansible.builtin.template \
             -a 'src=ansible/templates/kubeadm-init.yaml.j2 dest=test-results/kubeadm-init.yaml mode=0600' \
-            -e 'ansible_host=127.0.0.1 kubernetes_control_plane_endpoint=127.0.0.1:6443 kubernetes_pod_subnet=10.244.0.0/16 kubernetes_service_subnet=10.96.0.0/12 kubernetes_control_plane_host=127.0.0.1'
+            -e "ansible_host=$RUNNER_IP kubernetes_control_plane_endpoint=$RUNNER_IP:6443 kubernetes_pod_subnet=10.244.0.0/16 kubernetes_service_subnet=10.96.0.0/12 kubernetes_control_plane_host=$RUNNER_IP"
           sudo kubeadm init --dry-run --config test-results/kubeadm-init.yaml --ignore-preflight-errors=all
       - name: Format and validate Terraform starters
         run: |

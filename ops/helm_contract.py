@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tarfile
+from .tool_inputs import commit_sha, evidence_path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("lab", "generic", "onprem", "aws", "azure", "gcp")
@@ -46,19 +47,32 @@ def render(profile, *, source=ROOT, extra=(), namespace="rag", check=True):
     return subprocess.run(command + args, cwd=ROOT, capture_output=True, check=check, timeout=90)
 
 
+def capture_baseline(base_ref, output):
+    commit = commit_sha(base_ref)
+    archive = subprocess.check_output(['git', 'archive', commit, 'rag-chart', 'deploy'], cwd=ROOT)
+    source = output / 'source'
+    source.mkdir(exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as files:
+        files.extractall(source, filter='data')
+    for profile in PROFILES:
+        (output / f'{profile}.yaml').write_bytes(render(profile, source=source).stdout)
+    return commit
+
+
+def comparison_label(same, amended):
+    if same:
+        return 'byte-identical'
+    if amended:
+        return 'Amendment 4: ENABLE_VECTOR_STORE true -> false'
+    return 'UNEXPECTED CHANGE'
+
+
 def compare(base_ref=None, output=ROOT / 'test-results/o0-baseline'):
-    output = Path(output)
+    output = evidence_path(output)
     output.mkdir(parents=True, exist_ok=True)
     version = verify_version()
     if base_ref:
-        commit = subprocess.check_output(['git', 'rev-parse', base_ref], cwd=ROOT, text=True).strip()
-        archive = subprocess.check_output(['git', 'archive', commit, 'rag-chart', 'deploy'], cwd=ROOT)
-        source = output / 'source'
-        source.mkdir(exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(archive)) as files:
-            files.extractall(source, filter='data')
-        for profile in PROFILES:
-            (output / f'{profile}.yaml').write_bytes(render(profile, source=source).stdout)
+        commit = capture_baseline(base_ref, output)
     else:
         commit = json.loads((output / 'manifest.json').read_text())['commit']
     summary = {'base': commit, 'helm': version, 'profiles': {}}
@@ -80,7 +94,7 @@ def compare(base_ref=None, output=ROOT / 'test-results/o0-baseline'):
         summary['profiles'][profile] = {'identical': same, 'baselineSHA256': hashlib.sha256(baseline).hexdigest(),
                                         'currentSHA256': hashlib.sha256(current).hexdigest(),
                                         'amendment': 'A4: main image excludes Chroma; lab vector store disabled' if amended else None}
-        print(f'{profile}: {"byte-identical" if same else "Amendment 4: ENABLE_VECTOR_STORE true -> false" if amended else "UNEXPECTED CHANGE"}')
+        print(f'{profile}: {comparison_label(same, amended)}')
         if not (same or amended):
             changed.append(profile)
     (output / 'comparison.json').write_text(json.dumps(summary, indent=2) + '\n')

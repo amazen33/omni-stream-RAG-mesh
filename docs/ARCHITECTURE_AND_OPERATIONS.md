@@ -321,6 +321,11 @@ The refreshed direct dependencies were selected as of 2026-10-19 with a
 uv compile uses `--universal --python-version 3.12 --generate-hashes
 --exclude-newer 2026-10-05T00:00:00Z`; lab is constrained by main and dev by lab.
 Controller tools have their own hashed `ansible/requirements-controller.txt`.
+Ansible Core's controller-only patch moves 2.20.1→2.20.9 (released 2026-09-08,
+past the same cooling cutoff) to fix CVE-2026-11332. Other direct controller
+tool versions are preserved. CI selects kubeadm's configured 1.35 series
+explicitly and uses the disposable runner's real NIC for its local dry-run;
+the runner's unrelated Microsoft apt repository must not select another minor.
 The digest-pinned Python 3.12 Debian base remains unmodified. Runtime code is
 non-root, read-only, with writable temporary storage supplied by the runtime.
 

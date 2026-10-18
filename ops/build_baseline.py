@@ -4,12 +4,14 @@ import io
 from pathlib import Path
 import subprocess
 import tarfile
+from .tool_inputs import commit_sha, docker_executable
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def build(base_ref, docker='docker'):
-    commit = subprocess.check_output(['git', 'rev-parse', base_ref], cwd=ROOT, text=True).strip()
+    commit = commit_sha(base_ref)
+    docker = docker_executable(docker)
     source = ROOT / 'test-results/o0-baseline/image-source' / (commit + '-runtime')
     source.mkdir(parents=True, exist_ok=True)
     # Archive only Docker build inputs. Historical tracked pytest symlinks are

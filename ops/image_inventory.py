@@ -22,7 +22,10 @@ def inventory():
 
 
 def check_register(items, profile, register):
-    text = Path(register).read_text(encoding='utf-8')
+    expected = Path(__file__).resolve().parents[1] / 'THIRD-PARTY.md'
+    if Path(register).resolve() != expected:
+        raise ValueError('Only the repository THIRD-PARTY.md register may be checked')
+    text = expected.read_text(encoding='utf-8')
     section = text.split(f'<!-- {profile}-packages -->', 1)[1].split(f'<!-- /{profile}-packages -->', 1)[0]
     registered = set(re.findall(r'^\| ([\w.-]+) \| ([^ |]+) \|', section, re.M))
     missing = {(item['name'], item['version']) for item in items} - registered
@@ -42,7 +45,11 @@ if __name__ == '__main__':
     parser.add_argument('--profile', choices=('main', 'lab'), default='main')
     parser.add_argument('--inventory', metavar='JSON')
     args = parser.parse_args()
-    items = json.loads(Path(args.inventory).read_text()) if args.inventory else inventory()
+    if args.inventory:
+        from .tool_inputs import evidence_path
+        items = json.loads(evidence_path(args.inventory).read_text())
+    else:
+        items = inventory()
     if args.check:
         check_register(items, args.profile, args.check)
         print(f'{args.profile}: all {len(items)} installed distributions registered')

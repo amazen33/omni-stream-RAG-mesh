@@ -15,6 +15,7 @@ import re
 import subprocess
 import tarfile
 from urllib.request import Request, urlopen
+from .tool_inputs import commit_sha, evidence_path, scan_source
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCKS = ('requirements.txt', 'requirements-lab.txt', 'requirements-dev.txt', 'ansible/requirements-controller.txt')
@@ -26,7 +27,7 @@ def sha(data):
 
 
 def write(path, value):
-    Path(path).write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+    evidence_path(path).write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
 
 
 def fetch(url):
@@ -57,7 +58,11 @@ def tools(directory):
 
 
 def run(command, output, allowed=(0,), env=None):
-    with Path(output).open('wb') as stdout, Path(str(output) + '.stderr.log').open('wb') as stderr:
+    executable = Path(command[0]).resolve()
+    if executable.parent != (ROOT / '.tools/scanners').resolve() or executable.name not in ('syft', 'grype', 'osv-scanner'):
+        raise ValueError('Only the hash-verified scanner executables may run')
+    output = evidence_path(output)
+    with output.open('wb') as stdout, Path(str(output) + '.stderr.log').open('wb') as stderr:
         result = subprocess.run([str(x) for x in command], stdout=stdout, stderr=stderr, env=env, timeout=1200)
     if result.returncode not in allowed:
         raise RuntimeError(f'{Path(command[0]).name} failed ({result.returncode}); see {output}')
@@ -95,7 +100,14 @@ def severity(vulnerability, group):
     if re.fullmatch(r'\d+(?:\.\d+)?', maximum):
         scores.append(float(maximum))
     score = max(scores, default=-1)
-    return 'Critical' if score >= 9 else 'High' if score >= 7 else 'Medium' if score >= 4 else 'Low' if score > 0 else 'Negligible' if score == 0 else 'Unknown'
+    for threshold, level in ((9, 'Critical'), (7, 'High'), (4, 'Medium')):
+        if score >= threshold:
+            return level
+    if score > 0:
+        return 'Low'
+    if score == 0:
+        return 'Negligible'
+    return 'Unknown'
 
 
 def finding(target, package, version, aliases, level, fixes, scanner):
@@ -103,8 +115,8 @@ def finding(target, package, version, aliases, level, fixes, scanner):
     if not ids:
         raise ValueError('Vulnerability identity missing')
     vulnerability = next((x for x in ids if x.startswith('CVE-')), ids[0])
-    return dict(target=target, package=package, version=version, vulnerability=vulnerability,
-                aliases=ids, severity=level, fixAvailable=bool(fixes), fixVersions=sorted(set(fixes)), scanner=scanner)
+    return {'target': target, 'package': package, 'version': version, 'vulnerability': vulnerability,
+            'aliases': ids, 'severity': level, 'fixAvailable': bool(fixes), 'fixVersions': sorted(set(fixes)), 'scanner': scanner}
 
 
 def grype_findings(raw):
@@ -143,11 +155,7 @@ def identity(value):
     return (value['target'], value['package'], value['vulnerability'])
 
 
-def evaluate(findings, previous, kev, state, exceptions, on=None):
-    on = on or date.today()
-    if not isinstance(kev.get('catalogVersion'), str) or not isinstance(kev.get('vulnerabilities'), list):
-        raise ValueError('Invalid KEV catalogue')
-    kev_ids = {item['cveID'] for item in kev['vulnerabilities']}
+def validate_exceptions(exceptions, on):
     validated = []
     for entry in exceptions:
         created, expires = date.fromisoformat(entry['createdOn']), date.fromisoformat(entry['expires'])
@@ -157,30 +165,53 @@ def evaluate(findings, previous, kev, state, exceptions, on=None):
         if not entry.get('owner') or not entry.get('reason') or entry.get('approvedBy') != 'amazen33':
             raise ValueError('Owner approval missing for exception')
         validated.append(entry)
+    return validated
+
+
+def block_reason(value, is_kev, introduced, first, on):
+    if is_kev:
+        return 'KEV'
+    if not value['fixAvailable']:
+        return ''
+    if value['severity'] == 'Critical':
+        return 'Critical with fix'
+    if value['severity'] == 'High':
+        if introduced:
+            return 'High introduced by PR'
+        if (on - first).days >= 14:
+            return 'High with fix aged 14 days'
+    return ''
+
+
+def evaluate_one(raw, previous, kev_ids, history, exceptions, on):
+    value = dict(raw)
+    introduced = not any(p['target'] == value['target'] and p['package'] == value['package']
+                         and set(p['aliases']) & set(value['aliases']) for p in previous)
+    key = sha(json.dumps(identity(value), separators=(',', ':')).encode())
+    initial = on if introduced else min(INITIAL_DATE, on)
+    first = date.fromisoformat(history.get(key, initial.isoformat()))
+    if first > on:
+        raise ValueError('Future first-seen date')
+    history[key] = first.isoformat()
+    is_kev = bool(kev_ids & set(value['aliases']))
+    reason = block_reason(value, is_kev, introduced, first, on)
+    exception = next((e for e in exceptions if all(e[k] == value[k]
+                     for k in ('target', 'package', 'version', 'vulnerability'))), None)
+    if exception and (exception['severity'] != value['severity'] or (value['fixAvailable'] and not exception.get('workOrder'))):
+        raise ValueError('Exception severity or remediation work order is invalid')
+    value.update(introduced=introduced, firstSeen=first.isoformat(), kev=is_kev,
+                 blockReason=reason, exception=exception, blocked=bool(reason and not exception))
+    return value
+
+
+def evaluate(findings, previous, kev, state, exceptions, on=None):
+    on = on or date.today()
+    if not isinstance(kev.get('catalogVersion'), str) or not isinstance(kev.get('vulnerabilities'), list):
+        raise ValueError('Invalid KEV catalogue')
+    kev_ids = {item['cveID'] for item in kev['vulnerabilities']}
+    validated = validate_exceptions(exceptions, on)
     history = dict(state)
-    result = []
-    for raw in findings:
-        value = dict(raw)
-        # Match aliases, not merely a scanner-specific primary advisory name.
-        introduced = not any(p['target'] == value['target'] and p['package'] == value['package']
-                             and set(p['aliases']) & set(value['aliases']) for p in previous)
-        key = sha(json.dumps(identity(value), separators=(',', ':')).encode())
-        first = date.fromisoformat(history.get(key, on.isoformat() if introduced else min(INITIAL_DATE, on).isoformat()))
-        if first > on:
-            raise ValueError('Future first-seen date')
-        history[key] = first.isoformat()
-        is_kev = bool(kev_ids & set(value['aliases']))
-        reason = ('KEV' if is_kev else 'Critical with fix' if value['severity'] == 'Critical' and value['fixAvailable']
-                  else ('High introduced by PR' if introduced else 'High with fix aged 14 days')
-                  if value['severity'] == 'High' and value['fixAvailable'] and (introduced or (on - first).days >= 14)
-                  else '')
-        exception = next((e for e in validated if all(e[k] == value[k]
-                         for k in ('target', 'package', 'version', 'vulnerability'))), None)
-        if exception and (exception['severity'] != value['severity'] or (value['fixAvailable'] and not exception.get('workOrder'))):
-            raise ValueError('Exception severity or remediation work order is invalid')
-        value.update(introduced=introduced, firstSeen=first.isoformat(), kev=is_kev,
-                     blockReason=reason, exception=exception, blocked=bool(reason and not exception))
-        result.append(value)
+    result = [evaluate_one(raw, previous, kev_ids, history, validated, on) for raw in findings]
     return result, history
 
 
@@ -207,6 +238,14 @@ def main():
     args = parser.parse_args()
     if args.base_ref and args.baseline_source:
         raise ValueError('Choose a git base ref or an archived baseline source, not both')
+    args.out = evidence_path(args.out)
+    args.image = scan_source(args.image)
+    if args.baseline_image:
+        args.baseline_image = scan_source(args.baseline_image)
+    if args.base_ref:
+        args.base_ref = commit_sha(args.base_ref)
+    if args.baseline_source:
+        args.baseline_source = evidence_path(args.baseline_source)
     if not re.fullmatch(r'sha256:[a-f0-9]{64}', args.image_digest):
         raise ValueError('An exact local image ID or OCI digest is required')
     args.out.mkdir(parents=True, exist_ok=True)

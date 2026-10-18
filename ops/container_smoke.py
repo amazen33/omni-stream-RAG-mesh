@@ -3,19 +3,35 @@ import argparse
 import json
 import subprocess
 import time
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import uuid
+from .tool_inputs import docker_executable, image_reference
 
 
 def docker(binary, *args, check=True):
+    binary = docker_executable(binary)
     result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=120)
     if check and result.returncode:
         raise RuntimeError(f'docker {args[0]} failed: {result.stderr}')
     return (result.stdout + (result.stderr if args[0] == 'logs' else '')).strip()
 
 
+def wait_live(request):
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            status = request('/health/live')[0]
+        except OSError:
+            status = 0
+        if status == 200:
+            return
+        time.sleep(0.25)
+    raise RuntimeError('Container did not become live')
+
+
 def exercise(binary, image, vector=False):
+    binary, image = docker_executable(binary), image_reference(image)
     name = 'omni-o0-smoke-' + uuid.uuid4().hex
     created = False
     try:
@@ -41,15 +57,7 @@ def exercise(binary, image, vector=False):
             except HTTPError as error:
                 return error.code, error.read()
 
-        deadline = time.monotonic() + 90
-        while True:
-            try:
-                assert request('/health/live')[0] == 200
-                break
-            except (OSError, URLError, AssertionError):
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('Container did not become live')
-                time.sleep(0.25)
+        wait_live(request)
         probe = '''import errno,os
 assert os.getuid() != 0
 try:

@@ -3,9 +3,13 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+from .tool_inputs import docker_executable, evidence_path, image_reference
 
 
 def collect(docker, main, lab, output):
+    docker = docker_executable(docker)
+    main, lab = image_reference(main), image_reference(lab)
+    output = evidence_path(output)
     output.mkdir(parents=True, exist_ok=True)
     receipts = {}
     for profile, image in [('main', main), ('lab', lab)]:
