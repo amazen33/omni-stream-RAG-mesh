@@ -20,6 +20,8 @@ from .tool_inputs import commit_sha, evidence_path, scan_source
 ROOT = Path(__file__).resolve().parents[1]
 LOCKS = ('requirements.txt', 'requirements-lab.txt', 'requirements-dev.txt', 'ansible/requirements-controller.txt')
 INITIAL_DATE = date(2026, 10, 19)
+OUTPUT = ROOT / 'test-results/supply-chain'
+STATE = ROOT / '.tools/supply-chain-state.json'
 
 
 def sha(data):
@@ -28,8 +30,8 @@ def sha(data):
 
 def write(path, value):
     path = Path(path).resolve()
-    if not path.is_relative_to((ROOT / 'test-results').resolve()) and path != (ROOT / '.tools/supply-chain-state.json').resolve():
-        raise ValueError('Scanner JSON must stay in test-results or the fixed first-seen state file')
+    if path not in {OUTPUT / 'report.json', STATE}:
+        raise ValueError('Scanner JSON may write only the fixed report and first-seen state files')
     path.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
 
 
@@ -60,14 +62,53 @@ def tools(directory):
     return result, {name: {k: lock[name][k] for k in ('version', 'sha256', 'binarySHA256')} for name in result}
 
 
-def run(command, output, allowed=(0,), env=None):
+def scanner_file(value):
+    path = Path(value).resolve()
+    if not path.is_relative_to((ROOT / 'test-results').resolve()):
+        raise ValueError('Scanner evidence input must stay in test-results')
+    return str(path)
+
+
+def osv_arguments(arguments):
+    if not arguments:
+        raise ValueError('At least one explicit OSV lock file is required')
+    if len(arguments) % 2:
+        raise ValueError('OSV lock arguments must be pairs')
+    result = []
+    current = {(ROOT / relative).resolve() for relative in LOCKS}
+    for flag, value in zip(arguments[::2], arguments[1::2]):
+        if flag != '--lockfile' or not value.startswith('requirements.txt:'):
+            raise ValueError('Unexpected OSV lock option')
+        path = Path(value.removeprefix('requirements.txt:')).resolve()
+        if path not in current:
+            scanner_file(path)
+        result.extend(['--lockfile', 'requirements.txt:' + str(path)])
+    return result
+
+
+def scanner_command(command):
     executable = Path(command[0]).resolve()
     if executable.parent != (ROOT / '.tools/scanners').resolve() or executable.name not in ('syft', 'grype', 'osv-scanner'):
         raise ValueError('Only the hash-verified scanner executables may run')
-    options = {'-o', '--platform', '--lockfile', '--no-resolve', '--no-call-analysis=go', '--format=json'}
-    for argument in command[1:]:
-        if str(argument).startswith('-') and argument not in options:
-            raise ValueError('Unexpected scanner option')
+    binary = str(executable)
+    match [executable.name, *[str(value) for value in command[1:]]]:
+        case ['syft', 'scan', source, '--platform', 'linux/amd64', '-o', 'syft-json']:
+            return [binary, 'scan', scan_source(source), '--platform', 'linux/amd64', '-o', 'syft-json']
+        case ['syft', 'convert', source, '-o', 'cyclonedx-json']:
+            return [binary, 'convert', scanner_file(source), '-o', 'cyclonedx-json']
+        case ['grype', 'db', 'update']:
+            return [binary, 'db', 'update']
+        case ['grype', 'db', 'status', '-o', 'json']:
+            return [binary, 'db', 'status', '-o', 'json']
+        case ['grype', source, '-o', 'json'] if source.startswith('sbom:'):
+            return [binary, 'sbom:' + scanner_file(source.removeprefix('sbom:')), '-o', 'json']
+        case ['osv-scanner', 'scan', 'source', '--no-resolve', '--no-call-analysis=go', '--format=json', *locks]:
+            return [binary, 'scan', 'source', '--no-resolve', '--no-call-analysis=go', '--format=json', *osv_arguments(locks)]
+    raise ValueError('Unexpected scanner option or command')
+
+
+def run(command, output, allowed=(0,), env=None):
+    command = scanner_command(command)
     output = evidence_path(output)
     with output.open('wb') as stdout, Path(str(output) + '.stderr.log').open('wb') as stderr:
         result = subprocess.run([str(x) for x in command], stdout=stdout, stderr=stderr, env=env, timeout=1200)
@@ -255,13 +296,10 @@ def main():
     parser.add_argument('--baseline-image')
     parser.add_argument('--base-ref')
     parser.add_argument('--baseline-source', type=Path, help='Previously git-archived base lock files (for offline Git access)')
-    parser.add_argument('--out', type=Path, default=ROOT / 'test-results/supply-chain')
     args = parser.parse_args()
     if args.base_ref and args.baseline_source:
         raise ValueError('Choose a git base ref or an archived baseline source, not both')
-    args.out = evidence_path(args.out)
-    if not args.out.is_relative_to((ROOT / 'test-results').resolve()):
-        raise ValueError('Scanner output must be beneath repository test-results')
+    args.out = OUTPUT
     args.image = scan_source(args.image)
     if args.baseline_image:
         args.baseline_image = scan_source(args.baseline_image)
@@ -292,7 +330,7 @@ def main():
         previous += scan_locks(binaries, source, args.out / 'base.osv.json')
     elif args.baseline_source:
         previous += scan_locks(binaries, args.baseline_source, args.out / 'base.osv.json')
-    state_path = ROOT / '.tools/supply-chain-state.json'
+    state_path = STATE
     state = json.loads(state_path.read_text()) if state_path.is_file() else {}
     kev_raw = fetch('https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json')
     kev = json.loads(kev_raw)

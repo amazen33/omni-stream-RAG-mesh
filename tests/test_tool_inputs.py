@@ -3,7 +3,7 @@ import pytest
 
 from ops.tool_inputs import ROOT, commit_sha, docker_executable, evidence_path, image_reference, scan_source
 from ops.verify_oci import read_blob
-from ops.supply_chain import archive_base_locks, run, write
+from ops.supply_chain import archive_base_locks, osv_arguments, run, scanner_command, write
 
 
 @pytest.mark.parametrize('value', ['--output=/tmp/foreign', '-v', 'image\n--privileged', 'image;command'])
@@ -43,9 +43,13 @@ def test_oci_descriptor_cannot_escape_blob_directory(tmp_path):
         read_blob(tmp_path, 'sha256:../../foreign.json')
 
 
-def test_scanner_json_cannot_overwrite_application_source():
+def test_scanner_json_cannot_overwrite_application_source(tmp_path):
+    source = tmp_path / 'app/main.py'
+    source.parent.mkdir()
+    source.write_text('application source sentinel\n')
     with pytest.raises(ValueError, match='Scanner JSON'):
-        write(ROOT / 'app/main.py', {'synthetic': True})
+        write(source, {'synthetic': True})
+    assert source.read_text() == 'application source sentinel\n'
 
 
 def test_scanner_rejects_unexpected_options_before_execution():
@@ -56,3 +60,23 @@ def test_scanner_rejects_unexpected_options_before_execution():
 def test_base_lock_extraction_requires_a_commit_before_any_git_call():
     with pytest.raises(ValueError, match='immutable commit SHA'):
         archive_base_locks('--format=untrusted', ROOT / 'test-results')
+
+
+def test_scanner_command_is_rebuilt_from_the_closed_operation_set():
+    binary = str(ROOT / '.tools/scanners/grype')
+    assert scanner_command([binary, 'db', 'update']) == [binary, 'db', 'update']
+    with pytest.raises(ValueError, match='Unexpected scanner option'):
+        scanner_command([binary, 'db', 'delete'])
+
+
+def test_even_repository_evidence_cannot_replace_the_fixed_report_file(tmp_path):
+    unrelated = tmp_path / 'unrelated.json'
+    unrelated.write_text('unrelated evidence sentinel\n')
+    with pytest.raises(ValueError, match='fixed report'):
+        write(unrelated, {'synthetic': True})
+    assert unrelated.read_text() == 'unrelated evidence sentinel\n'
+
+
+def test_missing_baseline_locks_cannot_fall_back_to_scanning_current_sources():
+    with pytest.raises(ValueError, match='explicit OSV lock file'):
+        osv_arguments([])

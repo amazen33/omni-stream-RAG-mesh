@@ -139,6 +139,28 @@ jobs:
         uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3  # v1.12.0
       - name: Apply rendered contract to the disposable Kind API server
         run: |
+          # A server dry-run validates namespaced resources against namespaces
+          # that already exist; dry-running a Namespace does not create it.
+          python - <<'PY' > test-results/rendered-namespaces.txt
+          from pathlib import Path
+          import yaml
+
+          namespaces = set()
+          for filename in ("application.yaml", "infrastructure.yaml", "strimzi-crds.yaml"):
+              for document in yaml.safe_load_all((Path("test-results") / filename).read_text()):
+                  if not document:
+                      continue
+                  resources = document.get("items", []) if document.get("kind") == "List" else [document]
+                  for resource in resources:
+                      metadata = resource.get("metadata", {})
+                      namespace = metadata.get("name") if resource.get("kind") == "Namespace" else metadata.get("namespace")
+                      if namespace:
+                          namespaces.add(namespace)
+          print("\n".join(sorted(namespaces)))
+          PY
+          while IFS= read -r namespace; do
+            [ -z "$namespace" ] || kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
+          done < test-results/rendered-namespaces.txt
           kubectl apply --server-side --dry-run=server -f test-results/application.yaml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
