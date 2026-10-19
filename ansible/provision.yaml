@@ -211,7 +211,7 @@
     - name: Load Ollama models
       ansible.builtin.command:
         argv: "{{ kube_cli_argv + ['-n', rag_namespace, 'exec', 'deployment/ollama', '--', 'ollama', 'pull', item] }}"
-      loop: [nomic-embed-text, "llama3.2:3b"]
+      loop: [nomic-embed-text, "phi4-mini:3.8b"]
       async: 1800
       poll: 15
     - name: Create synthetic payment CDC table if absent

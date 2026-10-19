@@ -36,6 +36,65 @@ and compensating events. `docker-compose.yaml` supplies the local LGTM
 Collector, TimescaleDB, and EventStoreDB. Those stateful services are optional
 deployment extensions, not mandatory core-Python dependencies.
 
+## Measuring QoS
+
+`/metrics` exposes HTTP requests (`rag_http_requests_total`), duration
+(`rag_http_request_duration_seconds`, including 30/60/120-second buckets), and
+`rag_http_requests_in_flight`. Labels use matched route templates, including
+health/metrics routes; missing routes and router redirects use `unmatched`.
+Methods outside the standard HTTP verbs use `OTHER`. Status classes are `2xx`,
+`3xx`, `4xx`, `5xx`, or `other` (architect decision, 2026-10-19); every request
+updates both the counter and histogram. Exceptions and disconnects release the
+in-flight gauge. Linux scrapes also read RSS bytes, user+system CPU seconds and
+open descriptors from `/proc/self`; other operating systems omit these families.
+
+`python -m ops.synthetic_corpus --seed 44 --count 1` prints reproducible synthetic
+ingest documents (1/10/100 KiB), questions and payment payloads as JSON. No real
+PII or card numbers are generated. Locust is a hashed MIT dev dependency; the
+owner writes the scenarios and measures B0 in Part B of OMNI-WO-00.
+
+The local harness is `deploy/load/docker-compose.baseline.yaml`. `OMNI_IMAGE`
+accepts exactly two forms, with 64 lowercase hex characters after `sha256:`:
+
+- `ghcr.io/amazen33/omni-stream-rag-mesh@sha256:<64 hex>`: a published main
+  image manifest digest, required for B1/B2 (also allowed for B0).
+- `sha256:<64 hex>`: a local main-image ID from
+  `docker image inspect --format "{{.Id}}"`, allowed for B0 only, before publishing.
+
+Tags and lab images are rejected before uvicorn starts. Set `BASELINE_PHASE`
+to `B0` (default), `B1` or `B2`; the receipt records the phase, full reference
+and form (`local-main-image-id` or `ghcr-manifest-digest`). After building main,
+prepare a B0 run in PowerShell without printing the random token key:
+
+```powershell
+$env:OMNI_IMAGE = docker image inspect --format "{{.Id}}" local/omni-wo00:main
+$baselineKeyBytes = New-Object byte[] 32
+$baselineKeyRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $baselineKeyRng.GetBytes($baselineKeyBytes)
+    $env:BASELINE_TOKEN_KEY = [Convert]::ToBase64String($baselineKeyBytes)
+} finally {
+    $baselineKeyRng.Dispose()
+    [Array]::Clear($baselineKeyBytes, 0, $baselineKeyBytes.Length)
+}
+docker compose -f deploy/load/docker-compose.baseline.yaml up
+```
+
+Do not print the key, save it in the receipt or commit it. Remove the session
+environment variable after the run. The API keeps `RUNTIME_PROFILE: production`,
+2 CPUs/2 GiB, ephemeral stores, a read-only root and the production uvicorn
+command. Part A publishes no image and claims no baseline result.
+
+Inference stays off by default. For optional `--profile llm`, the owner selects
+`BASELINE_MODEL=phi4-mini:3.8b` (MIT, owner D-O13) or an explicitly approved
+`granite3.<variant>:<tag>` (Apache-2.0),
+sets `BASELINE_MODEL_SHA256` to its approved manifest SHA256 and
+`BASELINE_OLLAMA_MODELS` to an existing absolute Ollama model-cache directory,
+then sets `BASELINE_INFERENCE=true`. The digest-pinned Ollama service verifies
+the cached model manifest before serving; its cache is mounted read-only and
+the harness never pulls weights. Record the image/model digests with the run.
+`BASELINE_MODEL` remains an explicit owner input; other model families are rejected.
+
 ## Quick start
 1. Run `docker compose -f docker-compose.local.yaml up --build` for the standalone demonstration.
 2. This profile uses ephemeral memory storage and disables external integrations. For the full integration blueprint, copy `.env.example` to `.env`, replace secrets, provision the missing integration configuration described in the assessment, and create an object-lock audit bucket before enabling audit storage.
@@ -132,8 +191,12 @@ for that digest. GHCR digest and attestation evidence are available only after
 the owner runs that workflow after merge; local image IDs are separate evidence.
 Prereleases do not publish. No lab image is referenced by the chart.
 
-`llama3.2:3b` remains the existing local model default, but its community licence
-fails Twinfra G3.5 and needs an owner-selected replacement before model hosting.
+Owner decision D-O13 selects `phi4-mini:3.8b` as the default AI model (MIT;
+[official Ollama tag](https://ollama.com/library/phi4-mini:3.8b),
+[Microsoft model card](https://huggingface.co/microsoft/Phi-4-mini-instruct)).
+Its recorded manifest digest is
+`sha256:78fad5d182a7c33065e153a5f8ba210754207ba9d91973f57dffa7f487363753`;
+see the register for manifest provenance. `nomic-embed-text` remains the embedding model.
 No model weights are in either API image. Optional MinIO, Grafana, Loki, Tempo,
 EventStoreDB, TimescaleDB and Confluent Schema Registry are not used on Twinfra.
 

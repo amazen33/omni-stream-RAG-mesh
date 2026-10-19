@@ -21,6 +21,7 @@ from domain.events import (
 )
 from .health import HealthService
 from .metrics import exposition
+from .http_metrics import HTTPMetricsMiddleware
 from .settings import RuntimeSettings
 from .safe_logging import log_error
 
@@ -55,6 +56,9 @@ async def request_boundary(request: Request, call_next):
     response.headers["X-Correlation-ID"] = request.state.correlation_id
     response.headers["traceparent"] = request.state.traceparent
     return response
+
+
+app.add_middleware(HTTPMetricsMiddleware)
 
 class IngestRequest(BaseModel):
     text: str = Field(min_length=1, max_length=200000)
@@ -270,7 +274,7 @@ def ask(
     if os.getenv("ENABLE_OLLAMA_INFERENCE", "false").lower() == "true":
         from langchain_ollama import OllamaLLM
         llm = OllamaLLM(
-            model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            model=os.getenv("OLLAMA_MODEL", "phi4-mini:3.8b"),
             base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
         )
     retrieval.llm = llm

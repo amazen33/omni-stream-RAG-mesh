@@ -300,17 +300,41 @@ Grype reports their vulnerabilities. Python is PSF-2.0; pip is listed above.
 Sources: [official Python image](https://hub.docker.com/_/python),
 [Debian copyright policy](https://www.debian.org/doc/debian-policy/ch-docs.html#copyright-information).
 
+## Development tools — not installed in either API image
+
+| Tool | Version | Licence | Use and evidence |
+| --- | --- | --- | --- |
+| Locust | 2.46.7 | MIT (Tier 1) | Owner's OMNI-WO-00 Part B load generator. [Exact-version metadata and hashes](https://pypi.org/project/locust/2.46.7/); hashed in `requirements-dev.txt`, direct pin in `requirements-dev.in`. Scenarios and benchmark execution are outside Part A. |
+
+The dev lock is resolved under the existing lab/runtime constraints and the O0
+2026-10-05 cutoff. Adding Locust does not add a runtime image dependency.
+
 ## Model register — weights are not in either API image
 
 | Configured reference | Role | Upstream licence | Twinfra disposition |
 | --- | --- | --- | --- |
-| `llama3.2:3b` (`OLLAMA_MODEL`) | Local generation/risk scoring default | [Llama 3.2 Community License](https://huggingface.co/meta-llama/Llama-3.2-3B/blob/main/LICENSE.txt), custom terms and acceptable-use restrictions | Fails G3.5; no hosting approval. Owner must select a compliant replacement before model hosting. Default unchanged in O0. |
+| `phi4-mini:3.8b` (`OLLAMA_MODEL`) | Default AI model, owner D-O13 (2026-10-19) | MIT, [Microsoft model card](https://huggingface.co/microsoft/Phi-4-mini-instruct); [official Ollama tag](https://ollama.com/library/phi4-mini:3.8b) | Manifest `sha256:78fad5d182a7c33065e153a5f8ba210754207ba9d91973f57dffa7f487363753`, recorded from the [official manifest endpoint](https://registry.ollama.ai/v2/library/phi4-mini/manifests/3.8b) on 2026-10-19. G3.5 licence approved; no weights downloaded or run. |
 | `nomic-embed-text` (`OLLAMA_EMBED_MODEL`) | Local text embeddings default | [Apache-2.0, upstream weights and code](https://www.nomic.ai/news/nomic-embed-text-v1); [Ollama distribution](https://ollama.com/library/nomic-embed-text) | Tier 2 candidate; owner must approve the exact model artifact/digest before hosting. |
 
-Mutable model names are not an approved weight digest. No weights were pulled
-or served for O0. Ollama itself is MIT and is an optional separate service;
+Removed: `llama3.2:3b`; its [community licence](https://huggingface.co/meta-llama/Llama-3.2-3B/blob/main/LICENSE.txt) fails G3.5. Replaced by owner decision D-O13.
+
+The recorded Phi-4-mini digest is SHA256 of the 711-byte Ollama manifest response,
+not an individual weight blob or an Ollama image digest. The tag's short ID on
+the library page is `78fad5d182a7`. Tags can move: verify this digest before an
+owner-run pull/use; the baseline harness checks the pre-provisioned manifest.
+No weights were pulled or served. Ollama itself is MIT and is an optional separate service;
 its software licence does not determine a model's licence. Model governance,
 quality and hosting acceptance remain later-phase gates.
+
+OMNI-WO-00's optional baseline harness uses Ollama 0.34.4 ([MIT](https://github.com/ollama/ollama/blob/v0.34.4/LICENSE)),
+image index `sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551`
+(registry manifest inspected 2026-10-19). D-O13 selects
+[Phi-4-mini](https://huggingface.co/microsoft/Phi-4-mini-instruct/blob/main/LICENSE)
+(MIT) as the default. [Granite 3.x](https://huggingface.co/ibm-granite/granite-3.3-2b-instruct/blob/main/LICENSE)
+(Apache-2.0) remains an optional explicitly approved alternative. The baseline
+model and exact digest remain explicit owner inputs. The harness verifies that
+manifest in the owner's pre-provisioned read-only model cache and rejects
+Llama. No model weights, download, hosting acceptance or B0 run are delivered.
 
 ## Optional services
 

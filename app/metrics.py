@@ -2,19 +2,30 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import os
+from pathlib import Path
+import sys
 from threading import Lock
-from typing import Dict, Tuple
 
 _lock = Lock()
 _counters: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
-_gauges: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+_gauges: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {
+    ("rag_http_requests_in_flight", ()): 0.0,
+}
 _histogram_counts: dict[tuple[str, tuple[tuple[str, str], ...], float], int] = defaultdict(int)
 _histogram_sums: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
 _histogram_observations: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
-_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0)
+_PROC_SELF = Path("/proc/self")
 
 # Help text and type catalog for standard metrics
 _METRIC_HELP: dict[str, str] = {
+    "rag_http_requests_total": "Completed HTTP requests by route template, method and status class.",
+    "rag_http_request_duration_seconds": "HTTP request duration through response completion in seconds.",
+    "rag_http_requests_in_flight": "HTTP requests currently being handled.",
+    "process_resident_memory_bytes": "Resident memory size in bytes.",
+    "process_cpu_seconds_total": "Total user and system CPU time in seconds.",
+    "process_open_fds": "Number of open file descriptors.",
     "rag_health_checks_total": "Number of dependency health checks.",
     "rag_health_check_duration_seconds": "Duration of the latest dependency check.",
     "rag_ready": "Service readiness status gauge.",
@@ -27,6 +38,9 @@ _METRIC_HELP: dict[str, str] = {
 }
 
 _METRIC_TYPES: dict[str, str] = {
+    "rag_http_requests_total": "counter",
+    "rag_http_request_duration_seconds": "histogram",
+    "rag_http_requests_in_flight": "gauge",
     "rag_health_checks_total": "counter",
     "rag_health_check_duration_seconds": "gauge",
     "rag_ready": "gauge",
@@ -55,6 +69,47 @@ def set_gauge(name: str, value: float, labels: dict[str, str] | None = None) -> 
         _gauges[(name, _label_tuple(labels))] = value
 
 
+def http_in_flight(change: int) -> None:
+    with _lock:
+        key = ("rag_http_requests_in_flight", ())
+        _gauges[key] = _gauges.get(key, 0.0) + change
+
+
+def observe_http_request(route: str, method: str, status: int, seconds: float) -> None:
+    # Unknown HTTP verbs must not turn arbitrary caller strings into series.
+    if method not in {"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}:
+        method = "OTHER"
+    labels = {"route": route, "method": method}
+    status_class = f"{status // 100}xx" if status // 100 in (2, 3, 4, 5) else "other"
+    with _lock:
+        _counters[("rag_http_requests_total", _label_tuple({**labels, "status_class": status_class}))] += 1
+        _observe_duration("rag_http_request_duration_seconds", _label_tuple(labels), seconds)
+
+
+def _process_metrics() -> dict[str, tuple[str, float]]:
+    """Collect only Linux /proc data; unavailable fields are omitted, never zeroed."""
+    if sys.platform != "linux":
+        return {}
+    values: dict[str, tuple[str, float]] = {}
+    try:
+        resident_pages = int((_PROC_SELF / "statm").read_text().split()[1])
+        values["process_resident_memory_bytes"] = ("gauge", resident_pages * os.sysconf("SC_PAGE_SIZE"))
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        # comm (field 2) can contain spaces and parentheses; fields after its final ')' start at 3.
+        fields = (_PROC_SELF / "stat").read_text().rpartition(")")[2].split()
+        values["process_cpu_seconds_total"] = ("counter", (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK"))
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        # listdir temporarily opens its own descriptor while listing /proc/self/fd.
+        values["process_open_fds"] = ("gauge", max(0, len(os.listdir(_PROC_SELF / "fd")) - 1))
+    except OSError:
+        pass
+    return values
+
+
 def observe_check(name: str, status: str, duration_seconds: float) -> None:
     """Record a health check without putting target URLs, models, or secrets in labels."""
     inc_counter("rag_health_checks_total", {"check": name, "status": status})
@@ -74,14 +129,21 @@ def observe_ratelimit_rejection(boundary: str) -> None:
 
 
 def observe_boundary_duration(boundary: str, operation: str, duration_seconds: float) -> None:
-    labels = _label_tuple({"boundary": boundary, "operation": operation})
+    observe_duration("rag_boundary_duration_seconds", {"boundary": boundary, "operation": operation}, duration_seconds)
+
+
+def observe_duration(metric: str, labels: dict[str, str], duration_seconds: float) -> None:
     with _lock:
-        metric = "rag_boundary_duration_seconds"
-        _histogram_sums[(metric, labels)] += duration_seconds
-        _histogram_observations[(metric, labels)] += 1
-        for bucket in _DURATION_BUCKETS:
-            if duration_seconds <= bucket:
-                _histogram_counts[(metric, labels, bucket)] += 1
+        _observe_duration(metric, _label_tuple(labels), duration_seconds)
+
+
+def _observe_duration(metric: str, labels: tuple[tuple[str, str], ...], seconds: float) -> None:
+    """Caller holds _lock, keeping HTTP counters and histograms atomic at scrape."""
+    _histogram_sums[(metric, labels)] += seconds
+    _histogram_observations[(metric, labels)] += 1
+    for bucket in _DURATION_BUCKETS:
+        if seconds <= bucket:
+            _histogram_counts[(metric, labels, bucket)] += 1
 
 
 def observe_downstream_failure(boundary: str, dependency: str) -> None:
@@ -95,12 +157,16 @@ def observe_compensating_event(boundary: str, reason: str) -> None:
 def exposition() -> str:
     """Produce standard Prometheus exposition text grouped by metric family."""
     lines: list[str] = []
+    process = _process_metrics()
 
     with _lock:
         # Group counters by metric name
         counter_families: dict[str, list[tuple[tuple[tuple[str, str], ...], float]]] = defaultdict(list)
         for (metric, label_tuple), val in sorted(_counters.items()):
             counter_families[metric].append((label_tuple, val))
+        for metric, (kind, value) in process.items():
+            if kind == "counter":
+                counter_families[metric].append(((), value))
 
         # Declare every supported family even before its first observation.
         # This makes dashboards and scrape-time contract checks deterministic.
@@ -149,6 +215,9 @@ def exposition() -> str:
         gauge_families: dict[str, list[tuple[tuple[tuple[str, str], ...], float]]] = defaultdict(list)
         for (metric, label_tuple), val in sorted(_gauges.items()):
             gauge_families[metric].append((label_tuple, val))
+        for metric, (kind, value) in process.items():
+            if kind == "gauge":
+                gauge_families[metric].append(((), value))
 
         gauge_names = set(gauge_families) | {
             metric for metric, metric_type in _METRIC_TYPES.items() if metric_type == "gauge"

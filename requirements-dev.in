@@ -5,3 +5,4 @@ httpx==0.28.1
 moto[s3]==5.2.3
 PyYAML==6.0.3
 jsonschema==4.26.0
+locust==2.46.7
