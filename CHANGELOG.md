@@ -9,6 +9,8 @@ See [RELEASING.md](RELEASING.md) for the release streams.
 
 ### Added
 
+- OMNI-WO-00 Part A: bounded HTTP RED and Linux process metrics, seeded synthetic
+  QoS fixtures, a digest-pinned baseline Compose harness and Locust as a dev tool.
 - Release streams (Dev, Candidate, Stable): `RELEASING.md`, this changelog, the `VERSION`
   file (next release: 0.2.0), the `release-checks` and `release` workflows, and the rulesets
   in `.github/rulesets/`.

@@ -1,0 +1,55 @@
+# OMNI-WO-00 Part A harness only. No workload, downloads or benchmark run.
+services:
+  rag-api:
+    image: ghcr.io/amazen33/omni-stream-rag-mesh@sha256:${OMNI_IMAGE_SHA256:?Set the published Omni manifest SHA256 (64 hex characters)}
+    cpus: 2
+    mem_limit: 2g
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,noexec,size=64m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports: ["127.0.0.1:${BASELINE_PORT:-8000}:8000"]
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      RUNTIME_PROFILE: production
+      PII_TOKEN_SALT: synthetic-baseline-only-not-for-production
+      ENABLE_AUDIT_STORE: "false"
+      ENABLE_KAFKA: "false"
+      ENABLE_VECTOR_STORE: "false"
+      ENABLE_SEARCH_STORE: "false"
+      ENABLE_OLLAMA_INFERENCE: ${BASELINE_INFERENCE:-false}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${BASELINE_MODEL:-unselected}
+  ollama:
+    profiles: [llm]
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,size=128m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      HOME: /tmp
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODELS: /models
+      BASELINE_MODEL: ${BASELINE_MODEL:-unselected}
+      BASELINE_MODEL_SHA256: ${BASELINE_MODEL_SHA256:-unselected}
+    volumes:
+      - type: bind
+        source: ${BASELINE_OLLAMA_MODELS:-./models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        case "$$BASELINE_MODEL" in
+          phi4-mini:*|granite3.*:*) ;;
+          *) echo 'Choose Phi-4-mini or Granite 3.x with an explicit tag' >&2; exit 1 ;;
+        esac
+        case "$$BASELINE_MODEL" in *[!a-zA-Z0-9.:_-]*|*:*:*) exit 1 ;; esac
+        test "$${#BASELINE_MODEL_SHA256}" -eq 64
+        case "$$BASELINE_MODEL_SHA256" in *[!a-f0-9]*) exit 1 ;; esac
+        manifest="/models/manifests/registry.ollama.ai/library/$${BASELINE_MODEL%:*}/$${BASELINE_MODEL##*:}"
+        printf '%s  %s\n' "$$BASELINE_MODEL_SHA256" "$$manifest" | sha256sum -c -
+        exec /bin/ollama serve

@@ -300,6 +300,15 @@ Grype reports their vulnerabilities. Python is PSF-2.0; pip is listed above.
 Sources: [official Python image](https://hub.docker.com/_/python),
 [Debian copyright policy](https://www.debian.org/doc/debian-policy/ch-docs.html#copyright-information).
 
+## Development tools — not installed in either API image
+
+| Tool | Version | Licence | Use and evidence |
+| --- | --- | --- | --- |
+| Locust | 2.46.7 | MIT (Tier 1) | Owner's OMNI-WO-00 Part B load generator. [Exact-version metadata and hashes](https://pypi.org/project/locust/2.46.7/); hashed in `requirements-dev.txt`, direct pin in `requirements-dev.in`. Scenarios and benchmark execution are outside Part A. |
+
+The dev lock is resolved under the existing lab/runtime constraints and the O0
+2026-10-05 cutoff. Adding Locust does not add a runtime image dependency.
+
 ## Model register — weights are not in either API image
 
 | Configured reference | Role | Upstream licence | Twinfra disposition |
@@ -311,6 +320,15 @@ Mutable model names are not an approved weight digest. No weights were pulled
 or served for O0. Ollama itself is MIT and is an optional separate service;
 its software licence does not determine a model's licence. Model governance,
 quality and hosting acceptance remain later-phase gates.
+
+OMNI-WO-00's optional baseline harness uses Ollama 0.34.4 ([MIT](https://github.com/ollama/ollama/blob/v0.34.4/LICENSE)),
+image index `sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551`
+(registry manifest inspected 2026-10-19). The owner must choose
+[Phi-4-mini](https://huggingface.co/microsoft/Phi-4-mini-instruct/blob/main/LICENSE)
+(MIT) or [Granite 3.x](https://huggingface.co/ibm-granite/granite-3.3-2b-instruct/blob/main/LICENSE)
+(Apache-2.0) and approve its exact manifest digest. The harness verifies that
+manifest in the owner's pre-provisioned read-only model cache and rejects
+Llama. No model weights, download, hosting acceptance or B0 run are delivered.
 
 ## Optional services
 

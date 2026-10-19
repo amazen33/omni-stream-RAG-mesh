@@ -83,7 +83,24 @@ print('non-root and read-only application root verified')
             assert status == 200 and json.loads(body)['retrieved']
             assert request('/payments/transactions', {'transaction_id': 'synthetic-transaction',
                 'merchant_id': 'synthetic-merchant', 'amount_minor': 1, 'currency': 'USD'})[0] == 200
-            assert request('/metrics')[0] == 200
+            status, body = request('/metrics')
+            assert status == 200
+            text = body.decode()
+            for family, kind in (
+                ('rag_http_requests_total', 'counter'),
+                ('rag_http_request_duration_seconds', 'histogram'),
+                ('rag_http_requests_in_flight', 'gauge'),
+                ('process_resident_memory_bytes', 'gauge'),
+                ('process_cpu_seconds_total', 'counter'),
+                ('process_open_fds', 'gauge'),
+            ):
+                assert f'# HELP {family} ' in text
+                assert f'# TYPE {family} {kind}\n' in text
+            assert 'route="/payments/transactions",status_class="2xx"' in text
+            print('Linux /metrics sample:\n' + '\n'.join(
+                line for line in text.splitlines()
+                if line.startswith(('process_', 'rag_http_requests_total{', 'rag_http_requests_in_flight '))
+            ))
             print('main container HTTP smoke passed: health, docs denied, ingest, ask, payments, metrics')
     except BaseException:
         if created:

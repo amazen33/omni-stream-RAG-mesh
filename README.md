@@ -36,6 +36,39 @@ and compensating events. `docker-compose.yaml` supplies the local LGTM
 Collector, TimescaleDB, and EventStoreDB. Those stateful services are optional
 deployment extensions, not mandatory core-Python dependencies.
 
+## Measuring QoS
+
+`/metrics` exposes HTTP requests (`rag_http_requests_total`), duration
+(`rag_http_request_duration_seconds`, including 30/60/120-second buckets), and
+`rag_http_requests_in_flight`. Labels use matched route templates, including
+health/metrics routes; missing routes and router redirects use `unmatched`.
+Methods outside the standard HTTP verbs use `OTHER`. Status classes are `2xx`,
+`3xx`, `4xx`, `5xx`, or `other` (architect decision, 2026-10-19); every request
+updates both the counter and histogram. Exceptions and disconnects release the
+in-flight gauge. Linux scrapes also read RSS bytes, user+system CPU seconds and
+open descriptors from `/proc/self`; other operating systems omit these families.
+
+`python -m ops.synthetic_corpus --seed 44 --count 1` prints reproducible synthetic
+ingest documents (1/10/100 KiB), questions and payment payloads as JSON. No real
+PII or card numbers are generated. Locust is a hashed MIT dev dependency; the
+owner writes the scenarios and measures B0 in Part B of OMNI-WO-00.
+
+The local harness is `deploy/load/docker-compose.baseline.yaml`. Before an
+owner-run baseline, set `OMNI_IMAGE_SHA256` to the published Omni **manifest**
+digest's 64 hex characters (not a local image ID), then use
+`docker compose -f deploy/load/docker-compose.baseline.yaml up`. The API has
+2 CPUs/2 GiB, ephemeral stores, a read-only root and the production uvicorn
+command. No image is published by Part A and no baseline result is claimed.
+
+Inference stays off by default. For optional `--profile llm`, the owner selects
+`BASELINE_MODEL=phi4-mini:<tag>` (MIT) or `granite3.<variant>:<tag>` (Apache-2.0),
+sets `BASELINE_MODEL_SHA256` to its approved manifest SHA256 and
+`BASELINE_OLLAMA_MODELS` to an existing absolute Ollama model-cache directory,
+then sets `BASELINE_INFERENCE=true`. The digest-pinned Ollama service verifies
+the cached model manifest before serving; its cache is mounted read-only and
+the harness never pulls weights. Record the image/model digests with the run.
+No model is selected here; `llama3.2` is rejected by this harness.
+
 ## Quick start
 1. Run `docker compose -f docker-compose.local.yaml up --build` for the standalone demonstration.
 2. This profile uses ephemeral memory storage and disables external integrations. For the full integration blueprint, copy `.env.example` to `.env`, replace secrets, provision the missing integration configuration described in the assessment, and create an object-lock audit bucket before enabling audit storage.
