@@ -1,5 +1,8 @@
 .git
 .venv
+.tools
+.deployment
+requirements-dev.*
 .env
 **/__pycache__
 .pytest_cache

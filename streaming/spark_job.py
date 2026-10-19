@@ -16,9 +16,9 @@ events = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")) \
     .option("subscribe", os.getenv(
         "STREAMING_TOPICS",
-        "telemetry.ingested,transaction.processed,payments.transaction.ingested.v1,"
-        "payments.risk.scored.v1,audit.record.logged,ingestion.compensated,"
-        "transaction.compensated,payments.compensated.v1,state.transition.logged",
+        "telemetry.ingested,transaction.processed,payments.transaction.ingested.v2,"
+        "payments.risk.scored.v2,audit.record.logged,ingestion.compensated,"
+        "transaction.compensated,payments.compensated.v2,state.transition.logged",
     )) \
     .option("startingOffsets", os.getenv("STREAMING_STARTING_OFFSETS", "latest")).load()
 parsed = events.select(from_json(col("value").cast("string"), schema).alias("event")).select("event.*")

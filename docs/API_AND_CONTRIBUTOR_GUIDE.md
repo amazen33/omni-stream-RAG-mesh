@@ -8,7 +8,7 @@ for anyone adding an HTTP entrypoint. The executable source of truth is
 
 | Resource | Local URL |
 | --- | --- |
-| Interactive Swagger UI | `http://localhost:8000/docs` |
+| Interactive Swagger UI | `http://localhost:8000/docs` (only with `ENABLE_API_DOCS=true` in local/test/development) |
 | ReDoc | `http://localhost:8000/redoc` |
 | OpenAPI 3 JSON | `http://localhost:8000/openapi.json` |
 

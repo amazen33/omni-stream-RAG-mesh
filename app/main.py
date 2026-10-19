@@ -21,17 +21,20 @@ from domain.events import (
 )
 from .health import HealthService
 from .metrics import exposition
+from .settings import RuntimeSettings
+from .safe_logging import log_error
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
 log = logging.getLogger("rag")
-app = FastAPI(title="Hybrid Cloud Streaming RAG", version="1.0.0")
-audit = AuditSink()
+settings = RuntimeSettings.from_environment()
+app = FastAPI(title="Hybrid Cloud Streaming RAG", version="1.0.0",
+              docs_url="/docs" if settings.api_docs else None,
+              redoc_url="/redoc" if settings.api_docs else None,
+              openapi_url="/openapi.json" if settings.api_docs else None)
+audit = AuditSink(settings=settings)
 store = RetrievalStore()
-publisher = EventPublisher() if os.getenv("ENABLE_KAFKA", "false").lower() == "true" else NullPublisher()
-token_key = os.getenv("PII_TOKEN_SALT", "change-me")
-if token_key == "change-me" and os.getenv("RUNTIME_PROFILE", "local").lower() not in {"local", "test", "development"}:
-    raise RuntimeError("PII_TOKEN_SALT must be replaced outside a local/test runtime")
-redactor = PIIRedactor(token_key)
+publisher = EventPublisher(settings=settings) if os.getenv("ENABLE_KAFKA", "false").lower() == "true" else NullPublisher(settings=settings)
+redactor = PIIRedactor(settings.token_key)
 ingestion = IngestionService(redactor, publisher)
 retrieval = RetrievalService(store, publisher=publisher)
 payment_ingestion = PaymentIngestionService(publisher=publisher, token_key=redactor.salt)
@@ -97,8 +100,8 @@ def record_transition(
     safe_payload = redactor.sanitize_for_boundary(payload or {})
     try:
         audit.write_state_transition(correlation, state_from, state_to, reason, safe_payload)
-    except Exception:
-        log.exception("state_transition_audit_failed correlation_id=%s", correlation)
+    except Exception as exc:
+        log_error(log, "state_transition_audit_failed", exc, request_id=request, correlation_id=correlation)
     publisher.publish(
         StateTransitionLogged(
             correlation_id=correlation,
@@ -118,8 +121,8 @@ def record_compensation(correlation: str, record: dict[str, Any]) -> None:
     safe_record = redactor.sanitize_for_boundary(record)
     try:
         audit.write_compensation(correlation, safe_record)
-    except Exception:
-        log.exception("compensation_audit_failed correlation_id=%s", correlation)
+    except Exception as exc:
+        log_error(log, "compensation_audit_failed", exc, request_id=safe_record.get("request_id"), correlation_id=correlation)
 
 def _chunks(text: str, size: int = 800, overlap: int = 120) -> List[str]:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -177,7 +180,7 @@ def ingest(
         try:
             store.add(chunk_ids, [chunk.text for chunk in chunks])
         except Exception as exc:
-            log.exception("store_add_failed request_id=%s correlation_id=%s", rid, cid)
+            log_error(log, "store_add_failed", exc, request_id=rid, correlation_id=cid)
             error = type(exc).__name__
             record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Vector store write failed", trace)
             record_compensation(cid, {"boundary": "retrieval_store", "reason": "STORE_ADD_FAILED", "request_id": rid, "error": error})
@@ -192,11 +195,11 @@ def ingest(
         try:
             key = audit.write(rid, {**payload, "traceparent": trace}, correlation_id=cid)
         except Exception as exc:
-            log.exception("audit_write_failed request_id=%s correlation_id=%s", rid, cid)
+            log_error(log, "audit_write_failed", exc, request_id=rid, correlation_id=cid)
             try:
                 store.remove(chunk_ids)
             except Exception as rollback_exc:
-                log.exception("store_rollback_failed request_id=%s correlation_id=%s", rid, cid)
+                log_error(log, "store_rollback_failed", rollback_exc, request_id=rid, correlation_id=cid)
                 record_compensation(cid, {"boundary": "retrieval_store", "reason": "ROLLBACK_FAILED", "request_id": rid, "error": type(rollback_exc).__name__})
             record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Audit persistence failed", trace)
             record_compensation(cid, {"boundary": "audit_sink", "reason": "AUDIT_WRITE_FAILED", "request_id": rid, "error": type(exc).__name__})
@@ -285,7 +288,7 @@ def ask(
     try:
         key = audit.write(rid, payload, correlation_id=cid)
     except Exception as exc:
-        log.exception("audit_write_failed request_id=%s correlation_id=%s", rid, cid)
+        log_error(log, "audit_write_failed", exc, request_id=rid, correlation_id=cid)
         record_transition(cid, rid, "PROCESSING", "COMPENSATED", "Audit persistence failed", trace)
         record_compensation(cid, {"boundary": "audit_sink", "reason": "AUDIT_WRITE_FAILED", "request_id": rid, "error": type(exc).__name__})
         publisher.publish(

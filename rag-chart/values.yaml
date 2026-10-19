@@ -9,6 +9,7 @@ ragApi:
     repository: ghcr.io/amazen33/omni-stream-rag-mesh
     # Supply the SHA of a successfully scanned, published application image.
     tag: ""
+    digest: ""
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -47,7 +48,13 @@ diagnosticVerifier:
 db:
   host: postgres.rag.svc.cluster.local
   user: rag
-  password: changeme
+  existingSecret: ""
+  passwordKey: password
+  connectCluster: transactions
+  # A reviewed image containing the Debezium PostgreSQL connector and Strimzi providers.
+  connectImage: ""
+
+commonLabels: {}
 
 spark:
   suspend: true
@@ -69,6 +76,9 @@ networkPolicy:
   enabled: true
   ingress:
     istioNamespace: istio-ingress
+    gateway:
+      namespace: ""
+      podLabels: {}
     monitoringNamespace: monitoring
     metricsPort: 15020
   egress:

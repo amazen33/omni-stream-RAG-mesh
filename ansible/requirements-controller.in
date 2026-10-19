@@ -1,0 +1,6 @@
+# CI controller tooling only; not installed in either application image.
+ansible-core==2.20.9
+ansible-lint==25.9.0
+yamllint==1.37.1
+jsonschema==4.25.1
+PyYAML==6.0.3

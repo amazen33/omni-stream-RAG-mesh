@@ -18,11 +18,16 @@ selected region; only redacted text leaves trusted boundaries.
 | SPIRE + Istio sidecars | Accepted | SPIRE CSI bind-mounts the Workload API socket directory. Application readiness verifies that the local `SPIFFE_ENDPOINT_SOCKET` is connectable without reading SVID files or key material. Istio independently enforces Envoy STRICT mTLS. Neither replaces the other. |
 | Helm as deployment source | Accepted | The Helm chart is the one source for `rag-api`; Ansible and Argo CD render it, and delivery never mutates a Deployment with `kubectl set image`. |
 | Private gateway edge contract | Accepted | WAF → private Istio gateway → `rag-api` is required for on-prem and cloud. Direct WAF/load-balancer access to the workload is prohibited. |
+| Twinfra dev O0/O1 boundary | Accepted, O1 pending | The no-mesh Twinfra profile uses the existing APISIX gateway in `platform-services`, one ephemeral replica, no PDB and no ServiceAccount API token. O0 is local/CI evidence only; authenticated hosting requires O1's owner-run receipt. |
+| Main and local lab images (D-O12) | Accepted | Main excludes Chroma, NumPy, ONNX Runtime and Chroma-only dependencies. Only main may be published. The separate hashed lab lock is local development only; it retains Chroma's native licence notices in THIRD-PARTY.md. |
+| Safe runtime defaults | Accepted | Production is the default profile, requires a validated non-default HMAC key shared by audit and events, disables API documentation URLs and suppresses exception messages/tracebacks. Local/test entry points declare their profile. |
+| Digest delivery and authority | Accepted | Build main once as OCI, scan it with the pinned ADR-0049 tools, publish the same digest with GITHUB_TOKEN, and sign provenance. Twinfra is Argo CD only; no Twinfra kubeconfig in GitHub. Legacy push deployment requires ENABLE_PUSH_DEPLOY=true and a stable-tag dispatch. |
+| Source visibility and third-party register | Licence choice pending | GitHub reports public visibility; the owner explicitly authorized proceeding on 2026-10-19 after the discrepancy was reported. No source licence is inferred or added. THIRD-PARTY.md records actual main/lab packages, base-os once, and models; the current Llama default fails G3.5 and is not approved for Twinfra hosting. |
 
 ## Core tradeoffs
 
-Chroma is the local low-latency vector store while OpenSearch is an operational
-search/analytics adapter. Configured stores fail visibly rather than silently
+Chroma is the local lab vector store; the shipped main image omits it under
+D-O12. OpenSearch is the planned Twinfra search/vector adapter. Configured stores fail visibly rather than silently
 falling back to per-pod memory. AWS uses SigV4 with a least-privilege workload
 role; non-AWS search uses a protected basic-auth secret when selected.
 

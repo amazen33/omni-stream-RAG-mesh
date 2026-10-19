@@ -1,0 +1,36 @@
+# WO-44 O0: reference implementation, hosted on Twinfra dev (O1 acceptance pending).
+# Gateway source: E:/vCloud/module-2/manifests/apisix-dependency.yaml:199-225.
+ragApi:
+  replicaCount: 1
+podDisruptionBudget:
+  enabled: false
+mesh:
+  enabled: false
+  istio: {injectSidecar: false}
+  spiffe: {enabled: false}
+serviceAccount:
+  automountServiceAccountToken: false
+commonLabels:
+  twinfra.io/environment: dev
+  twinfra.io/workload: omni
+config:
+  ENABLE_VECTOR_STORE: "false"
+  ENABLE_SEARCH_STORE: "false"
+  ENABLE_AUDIT_STORE: "false"
+  ENABLE_KAFKA: "false"
+  ENABLE_OLLAMA_INFERENCE: "false"
+  ANONYMIZED_TELEMETRY: "False"
+networkPolicy:
+  ingress:
+    gateway:
+      namespace: platform-services
+      podLabels:
+        app.kubernetes.io/name: apisix
+        app.kubernetes.io/instance: apisix
+    metricsPort: 8000
+  egress:
+    workloadPorts: []
+    externalCIDRs: []
+    metadataCIDRs: []
+auditInit:
+  enabled: false

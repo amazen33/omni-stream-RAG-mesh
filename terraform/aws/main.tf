@@ -151,8 +151,8 @@ resource "aws_s3_bucket_object_lock_configuration" "audit" {
 
   rule {
     default_retention {
-      mode  = var.audit_lock_mode
-      days  = var.audit_retention_days
+      mode = var.audit_lock_mode
+      days = var.audit_retention_days
     }
   }
 }
@@ -203,14 +203,14 @@ resource "aws_opensearch_domain" "search" {
 
 output "mesh_deployment_contract" {
   value = {
-    deployment_profile = "aws"
-    spire_trust_domain = var.spire_trust_domain
-    spire_cluster_name = var.spire_cluster_name
-    mesh_ingress_host  = var.mesh_ingress_host
-    edge_waf           = "AWS WAF or equivalent must forward only to the private Istio gateway"
-    audit_backend      = "s3"
+    deployment_profile   = "aws"
+    spire_trust_domain   = var.spire_trust_domain
+    spire_cluster_name   = var.spire_cluster_name
+    mesh_ingress_host    = var.mesh_ingress_host
+    edge_waf             = "AWS WAF or equivalent must forward only to the private Istio gateway"
+    audit_backend        = "s3"
     audit_retention_days = var.audit_retention_days
-    audit_lock_mode    = var.audit_lock_mode
-    search_auth_mode   = "aws_sigv4"
+    audit_lock_mode      = var.audit_lock_mode
+    search_auth_mode     = "aws_sigv4"
   }
 }
