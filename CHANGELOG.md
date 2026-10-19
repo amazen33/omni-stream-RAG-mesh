@@ -11,6 +11,8 @@ See [RELEASING.md](RELEASING.md) for the release streams.
 
 - OMNI-WO-00 Part A: bounded HTTP RED and Linux process metrics, seeded synthetic
   QoS fixtures, a digest-pinned baseline Compose harness and Locust as a dev tool.
+- Allow a local main-image ID for unpublished B0, require a per-run token key,
+  and select Phi-4-mini 3.8b (MIT) as the default AI model under owner D-O13.
 - Release streams (Dev, Candidate, Stable): `RELEASING.md`, this changelog, the `VERSION`
   file (next release: 0.2.0), the `release-checks` and `release` workflows, and the rulesets
   in `.github/rulesets/`.

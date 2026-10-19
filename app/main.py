@@ -274,7 +274,7 @@ def ask(
     if os.getenv("ENABLE_OLLAMA_INFERENCE", "false").lower() == "true":
         from langchain_ollama import OllamaLLM
         llm = OllamaLLM(
-            model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            model=os.getenv("OLLAMA_MODEL", "phi4-mini:3.8b"),
             base_url=os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
         )
     retrieval.llm = llm

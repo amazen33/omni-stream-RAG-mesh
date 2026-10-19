@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tarfile
@@ -60,12 +61,28 @@ def capture_baseline(base_ref, output):
     return commit
 
 
-def comparison_label(same, amended):
+def comparison_label(same, amendments):
     if same:
         return 'byte-identical'
-    if amended:
-        return 'Amendment 4: ENABLE_VECTOR_STORE true -> false'
+    if amendments:
+        return '; '.join(amendments)
     return 'UNEXPECTED CHANGE'
+
+
+def approved_lab_changes(baseline, current):
+    """Allow only the two owner-approved ConfigMap substitutions, byte for byte."""
+    expected = baseline
+    amendments = []
+    before, after = b'ENABLE_VECTOR_STORE: "true"', b'ENABLE_VECTOR_STORE: "false"'
+    if expected.count(before) == 1:
+        expected = expected.replace(before, after)
+        amendments.append('A4: main image excludes Chroma; lab vector store disabled')
+    pattern = rb'(?m)^([ \t]+OLLAMA_MODEL: )(")?([^"\r\n]+)(?(2)")(\r?\n)'
+    matches = list(re.finditer(pattern, expected))
+    if len(matches) == 1 and matches[0].group(3) != b'phi4-mini:3.8b':
+        expected = re.sub(pattern, lambda match: match[1] + (match[2] or b'') + b'phi4-mini:3.8b' + (match[2] or b'') + match[4], expected)
+        amendments.append('D-O13: OLLAMA_MODEL default -> phi4-mini:3.8b (MIT)')
+    return amendments if expected == current else []
 
 
 def compare(base_ref=None, output=ROOT / 'test-results/o0-baseline'):
@@ -86,17 +103,12 @@ def compare(base_ref=None, output=ROOT / 'test-results/o0-baseline'):
                                                 fromfile=f'{profile}:baseline', tofile=f'{profile}:current'))
         (output / f'{profile}.diff').write_text(difference, encoding='utf-8')
         same = baseline == current
-        # The sole allowed legacy difference is Amendment 4: the Kubernetes
-        # lab profile runs the shipped main image, which excludes Chroma.
-        before = b'ENABLE_VECTOR_STORE: "true"'
-        after = b'ENABLE_VECTOR_STORE: "false"'
-        amended = (profile == 'lab' and baseline.count(before) == 1
-                   and baseline.replace(before, after) == current)
+        amendments = approved_lab_changes(baseline, current) if profile == 'lab' and not same else []
         summary['profiles'][profile] = {'identical': same, 'baselineSHA256': hashlib.sha256(baseline).hexdigest(),
                                         'currentSHA256': hashlib.sha256(current).hexdigest(),
-                                        'amendment': 'A4: main image excludes Chroma; lab vector store disabled' if amended else None}
-        print(f'{profile}: {comparison_label(same, amended)}')
-        if not (same or amended):
+                                        'amendment': '; '.join(amendments) if amendments else None}
+        print(f'{profile}: {comparison_label(same, amendments)}')
+        if not (same or amendments):
             changed.append(profile)
     (output / 'comparison.json').write_text(json.dumps(summary, indent=2) + '\n')
     if changed:

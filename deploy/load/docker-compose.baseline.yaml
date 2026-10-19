@@ -1,7 +1,7 @@
 # OMNI-WO-00 Part A harness only. No workload, downloads or benchmark run.
 services:
   rag-api:
-    image: ghcr.io/amazen33/omni-stream-rag-mesh@sha256:${OMNI_IMAGE_SHA256:?Set the published Omni manifest SHA256 (64 hex characters)}
+    image: ${OMNI_IMAGE:?Set a GHCR reference by digest or a local main-image ID (sha256 plus 64 hex) for B0 only}
     cpus: 2
     mem_limit: 2g
     read_only: true
@@ -9,10 +9,13 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports: ["127.0.0.1:${BASELINE_PORT:-8000}:8000"]
+    entrypoint: ["python", "-m", "ops.baseline_image"]
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       RUNTIME_PROFILE: production
-      PII_TOKEN_SALT: synthetic-baseline-only-not-for-production
+      PII_TOKEN_SALT: ${BASELINE_TOKEN_KEY:?Generate a random key for this run}
+      BASELINE_IMAGE: ${OMNI_IMAGE:?Set the baseline image reference}
+      BASELINE_PHASE: ${BASELINE_PHASE:-B0}
       ENABLE_AUDIT_STORE: "false"
       ENABLE_KAFKA: "false"
       ENABLE_VECTOR_STORE: "false"
