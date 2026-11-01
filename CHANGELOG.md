@@ -9,6 +9,9 @@ See [RELEASING.md](RELEASING.md) for the release streams.
 
 ### Security
 
+- W-9: patch aged High findings with pyasn1 0.6.5 in runtime/lab/dev,
+  aiohttp 3.14.4 and filelock 4.2.1 in lab/dev, and black 26.10.1 plus
+  filelock 4.2.1 in CI controller tooling; preserve other dependency pins.
 - W-8: refresh the pinned Python base to 3.12.16, certifi to 2026.10.18 in
   runtime/lab/dev locks, and dev-only Brotli to 1.2.1 for ADR-0049 blockers.
 
