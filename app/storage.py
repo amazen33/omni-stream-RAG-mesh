@@ -4,11 +4,22 @@ from __future__ import annotations
 from collections import OrderedDict
 import logging
 import os
+import re
 from typing import Any
 from .safe_logging import log_error
 
 
 log = logging.getLogger(__name__)
+_MEMORY_PRIVACY_TOKEN = re.compile(r"<pii_[a-z0-9_]+_v1_[0-9a-f]{32}>")
+_MEMORY_WORD = re.compile(r"\b[^\W_]+\b")
+
+
+def _memory_tokens(text: str) -> set[str]:
+    """Casefold words while keeping complete redaction tokens as single units."""
+    folded = text.casefold()
+    privacy_tokens = set(_MEMORY_PRIVACY_TOKEN.findall(folded))
+    words = _MEMORY_PRIVACY_TOKEN.sub(" ", folded).replace("_", " ")
+    return privacy_tokens.union(_MEMORY_WORD.findall(words))
 
 
 def _enabled(name: str) -> bool:
@@ -179,9 +190,9 @@ class RetrievalStore:
                 for index, hit in enumerate(result["hits"]["hits"])
                 if float(hit.get("_score") or 0) > 0
             ]
-        words = set(text.lower().split())
+        words = _memory_tokens(text)
         scored = [
-            (document, len(words.intersection(document.lower().split())))
+            (document, len(words.intersection(_memory_tokens(document))))
             for document in self._documents.values()
         ]
         return [
