@@ -7,6 +7,11 @@ See [RELEASING.md](RELEASING.md) for the release streams.
 
 ## [Unreleased]
 
+### Security
+
+- W-8: refresh the pinned Python base to 3.12.16, certifi to 2026.10.18 in
+  runtime/lab/dev locks, and dev-only Brotli to 1.2.1 for ADR-0049 blockers.
+
 ### Added
 
 - OMNI-WO-00 Part A: bounded HTTP RED and Linux process metrics, seeded synthetic

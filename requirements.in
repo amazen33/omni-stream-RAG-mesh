@@ -1,6 +1,6 @@
-# O0: newest non-yanked stable PyPI releases available by 2026-10-05T00:00:00Z.
-# Refresh with uv pip compile --universal --python-version 3.12 --generate-hashes
-# --exclude-newer 2026-10-05T00:00:00Z requirements.in -o requirements.txt
+# O0 baseline: non-security pins retain the 2026-10-05 cutoff.
+# W-8: regenerate the fixed leaf packages with pip-tools --generate-hashes,
+# preserving the existing non-target pins and universal platform markers.
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
 boto3==1.43.108
@@ -11,3 +11,5 @@ langchain-text-splitters==1.1.3
 langchain-ollama==1.1.0
 opensearch-py==3.2.0
 kafka-python==3.0.11
+# W-8: remove compromised roots (GHSA-6q48-6c7w-9gw2).
+certifi==2026.10.18

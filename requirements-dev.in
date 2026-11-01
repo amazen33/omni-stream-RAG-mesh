@@ -6,3 +6,5 @@ moto[s3]==5.2.3
 PyYAML==6.0.3
 jsonschema==4.26.0
 locust==2.46.7
+# W-8: CVE-2026-111497 (KEV); owner expedited 1.2.1 on 2026-11-01.
+brotli==1.2.1
