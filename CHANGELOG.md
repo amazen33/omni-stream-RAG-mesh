@@ -24,6 +24,8 @@ See [RELEASING.md](RELEASING.md) for the release streams.
 
 ### Changed
 
+- W-7: normalize memory-mode retrieval with Unicode casefolded word tokens,
+  preserving complete PII tokens; use the merged fix as the new B0 reference.
 - WO-44 O0 (Amendments 1–4): refresh and hash runtime/dev/controller locks;
   split shipped main from local-only Chroma lab image; pin the Python base and
   CI actions; replace Trivy with pinned Syft/Grype/OSV gates; publish the scanned
