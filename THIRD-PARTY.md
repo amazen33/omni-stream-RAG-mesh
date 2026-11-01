@@ -60,7 +60,7 @@ components; their bundled notices and upstream source links remain available.
 | azure-storage-blob | 12.31.0 | [MIT](https://pypi.org/project/azure-storage-blob/12.31.0/) | Tier 1 |
 | boto3 | 1.43.108 | [Apache-2.0](https://pypi.org/project/boto3/1.43.108/) | Tier 2 |
 | botocore | 1.43.108 | [Apache-2.0](https://pypi.org/project/botocore/1.43.108/) | Tier 2 |
-| certifi | 2026.7.22 | [MPL-2.0](https://pypi.org/project/certifi/2026.7.22/) | Tier 3, unmodified |
+| certifi | 2026.10.18 | [MPL-2.0](https://pypi.org/project/certifi/2026.10.18/) | Tier 3, unmodified |
 | cffi | 2.1.1 | [MIT-0](https://pypi.org/project/cffi/2.1.1/) | Tier 1 |
 | charset-normalizer | 3.5.2 | [MIT](https://pypi.org/project/charset-normalizer/3.5.2/) | Tier 1 |
 | click | 8.5.0 | [BSD-3-Clause](https://pypi.org/project/click/8.5.0/) | Tier 1 |
@@ -172,7 +172,7 @@ actual image inventories.
 | boto3 | 1.43.108 | [Apache-2.0](https://pypi.org/project/boto3/1.43.108/) | Tier 2 |
 | botocore | 1.43.108 | [Apache-2.0](https://pypi.org/project/botocore/1.43.108/) | Tier 2 |
 | build | 1.6.1 | [MIT](https://pypi.org/project/build/1.6.1/) | Tier 1 |
-| certifi | 2026.7.22 | [MPL-2.0](https://pypi.org/project/certifi/2026.7.22/) | Tier 3, unmodified |
+| certifi | 2026.10.18 | [MPL-2.0](https://pypi.org/project/certifi/2026.10.18/) | Tier 3, unmodified |
 | cffi | 2.1.1 | [MIT-0](https://pypi.org/project/cffi/2.1.1/) | Tier 1 |
 | charset-normalizer | 3.5.2 | [MIT](https://pypi.org/project/charset-normalizer/3.5.2/) | Tier 1 |
 | chromadb | 1.5.9 | [Apache-2.0](https://pypi.org/project/chromadb/1.5.9/) | Tier 2 |
@@ -287,7 +287,7 @@ actual image inventories.
 ## Base image — class `base-os` (recorded once)
 
 Both profiles inherit exactly
-`python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1`.
+`python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159`.
 The official Debian-based Python image's operating-system packages remain
 unmodified aggregated programs, including its GPL utilities and LGPL system
 libraries (for example bash/coreutils/glibc). Per the review's "Base image"
