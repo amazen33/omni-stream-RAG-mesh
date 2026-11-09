@@ -102,7 +102,7 @@ components; their bundled notices and upstream source links remain available.
 | pip | 25.0.1 | [MIT](https://pypi.org/project/pip/25.0.1/) | Tier 1 |
 | proto-plus | 1.29.0 | [Apache-2.0](https://pypi.org/project/proto-plus/1.29.0/) | Tier 2 |
 | protobuf | 7.36.2 | [BSD-3-Clause](https://pypi.org/project/protobuf/7.36.2/) | Tier 1 |
-| pyasn1 | 0.6.4 | [BSD-2-Clause](https://pypi.org/project/pyasn1/0.6.4/) | Tier 1 |
+| pyasn1 | 0.6.5 | [BSD-2-Clause](https://pypi.org/project/pyasn1/0.6.5/) | Tier 1 |
 | pyasn1-modules | 0.4.2 | [BSD-2-Clause](https://pypi.org/project/pyasn1-modules/0.4.2/) | Tier 1 |
 | pycparser | 3.0 | [BSD-3-Clause](https://pypi.org/project/pycparser/3.0/) | Tier 1 |
 | pydantic | 2.13.5 | [MIT](https://pypi.org/project/pydantic/2.13.5/) | Tier 1 |
@@ -160,7 +160,7 @@ actual image inventories.
 | Package | Version | Upstream SPDX / selected terms | Class |
 | --- | --- | --- | --- |
 | aiohappyeyeballs | 2.7.1 | [PSF-2.0](https://pypi.org/project/aiohappyeyeballs/2.7.1/) | Tier 1 |
-| aiohttp | 3.14.3 | [Apache-2.0 AND MIT](https://pypi.org/project/aiohttp/3.14.3/) | Tier 2 |
+| aiohttp | 3.14.4 | [Apache-2.0 AND MIT](https://pypi.org/project/aiohttp/3.14.4/) | Tier 2 |
 | aiosignal | 1.4.0 | [Apache-2.0](https://pypi.org/project/aiosignal/1.4.0/) | Tier 2 |
 | annotated-doc | 0.0.5 | [MIT](https://pypi.org/project/annotated-doc/0.0.5/) | Tier 1 |
 | annotated-types | 0.8.0 | [MIT](https://pypi.org/project/annotated-types/0.8.0/) | Tier 1 |
@@ -182,7 +182,7 @@ actual image inventories.
 | durationpy | 0.11 | [MIT](https://pypi.org/project/durationpy/0.11/) | Tier 1 |
 | events | 0.5 | [BSD-3-Clause](https://pypi.org/project/events/0.5/) | Tier 1 |
 | fastapi | 0.142.2 | [MIT](https://pypi.org/project/fastapi/0.142.2/) | Tier 1 |
-| filelock | 4.0.10 | [MIT](https://pypi.org/project/filelock/4.0.10/) | Tier 1 |
+| filelock | 4.2.1 | [MIT](https://pypi.org/project/filelock/4.2.1/) | Tier 1 |
 | flatbuffers | 25.12.19 | [Apache-2.0](https://pypi.org/project/flatbuffers/25.12.19/) | Tier 2 |
 | frozenlist | 1.8.0 | [Apache-2.0](https://pypi.org/project/frozenlist/1.8.0/) | Tier 2 |
 | fsspec | 2026.9.0 | [BSD-3-Clause](https://pypi.org/project/fsspec/2026.9.0/) | Tier 1 |
@@ -241,7 +241,7 @@ actual image inventories.
 | propcache | 0.5.4 | [Apache-2.0](https://pypi.org/project/propcache/0.5.4/) | Tier 2 |
 | proto-plus | 1.29.0 | [Apache-2.0](https://pypi.org/project/proto-plus/1.29.0/) | Tier 2 |
 | protobuf | 7.36.2 | [BSD-3-Clause](https://pypi.org/project/protobuf/7.36.2/) | Tier 1 |
-| pyasn1 | 0.6.4 | [BSD-2-Clause](https://pypi.org/project/pyasn1/0.6.4/) | Tier 1 |
+| pyasn1 | 0.6.5 | [BSD-2-Clause](https://pypi.org/project/pyasn1/0.6.5/) | Tier 1 |
 | pyasn1-modules | 0.4.2 | [BSD-2-Clause](https://pypi.org/project/pyasn1-modules/0.4.2/) | Tier 1 |
 | pybase64 | 1.5.1 | [BSD-2-Clause](https://pypi.org/project/pybase64/1.5.1/) | Tier 1 |
 | pycparser | 3.0 | [BSD-3-Clause](https://pypi.org/project/pycparser/3.0/) | Tier 1 |

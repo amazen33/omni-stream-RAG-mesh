@@ -13,3 +13,5 @@ opensearch-py==3.2.0
 kafka-python==3.0.11
 # W-8: remove compromised roots (GHSA-6q48-6c7w-9gw2).
 certifi==2026.10.18
+# W-9: four ASN.1 decoder fixes; owner waived 0.6.5 cooling-off on 2026-11-02.
+pyasn1==0.6.5
